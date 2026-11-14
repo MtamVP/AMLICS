@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Pencil,
+  Trash2,
   X,
 } from 'lucide-react';
 import { PIPELINE_TEMPLATES, QUICK_SNIPPETS } from '../data/sampleDatasets';
@@ -93,10 +94,32 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
       if (e.key === 'Escape' && zoomedPlotSrc) {
         setZoomedPlotSrc(null);
       }
+      if (e.altKey && e.key === 'Backspace' && activeCellId) {
+        const tag = (document.activeElement?.tagName || '').toLowerCase();
+        if (tag !== 'input' && tag !== 'textarea') {
+          e.preventDefault();
+          onDeleteCell(activeCellId);
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [zoomedPlotSrc]);
+  }, [zoomedPlotSrc, activeCellId, onDeleteCell]);
+
+  const allCollapsed =
+    cells.length > 0 && cells.every((c) => Boolean(collapsedCells[c.id]));
+
+  const toggleCollapseAll = () => {
+    if (allCollapsed) {
+      setCollapsedCells({});
+    } else {
+      const next: Record<string, boolean> = {};
+      cells.forEach((c) => {
+        next[c.id] = true;
+      });
+      setCollapsedCells(next);
+    }
+  };
 
   const toggleMarkdownEdit = (id: string, forceState?: boolean) => {
     setEditingMarkdownIds((prev) => ({
@@ -246,6 +269,27 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
           <span className="text-[11px] text-[#9aa0a6] hidden sm:inline">
             {cells.length} cells
           </span>
+          {cells.length > 0 && (
+            <button
+              type="button"
+              onClick={toggleCollapseAll}
+              className="px-2 py-0.5 rounded font-mono text-[11px] border border-[#3c4043] text-[#9aa0a6] hover:text-[#e8eaed] hover:bg-[#292a2d] transition-colors"
+              title="Thu gọn hoặc mở rộng tất cả các cell để dễ tìm và xóa nhanh"
+            >
+              {allCollapsed ? 'Mở tất cả' : 'Thu gọn tất cả'}
+            </button>
+          )}
+          {activeCellId && (
+            <button
+              type="button"
+              onClick={() => onDeleteCell(activeCellId)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded font-mono text-[11px] border border-[#f28b82]/40 text-[#f28b82] hover:bg-[#f28b82]/15 transition-colors"
+              title="Xóa cell đang chọn (Alt+Backspace)"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span className="hidden md:inline">Xóa cell</span>
+            </button>
+          )}
         </div>
 
         <span className="hidden lg:inline text-[10px] font-mono text-[#9aa0a6]">
@@ -358,10 +402,10 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                       <button
                         type="button"
                         onClick={() => onDeleteCell(cell.id)}
-                        className="px-1.5 py-0.5 rounded-sm hover:bg-[#3c4043] text-[#9aa0a6] hover:text-[#f28b82]"
-                        title="Delete cell"
+                        className="p-1 rounded-sm hover:bg-[#f28b82]/15 text-[#9aa0a6] hover:text-[#f28b82] transition-colors"
+                        title="Xóa cell này"
                       >
-                        ×
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </div>
@@ -422,7 +466,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                 }`}
               >
                 {/* Code Cell Header */}
-                <div className="px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between gap-2 text-xs">
+                <div className="sticky top-0 z-10 px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     {/* Colab Play / Stop Bracket */}
                     {isRunning ? (
@@ -585,10 +629,10 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteCell(cell.id)}
-                      className="px-1.5 py-0.5 rounded-sm hover:bg-[#3c4043] text-[#9aa0a6] hover:text-[#f28b82]"
-                      title="Delete cell"
+                      className="p-1 rounded-sm hover:bg-[#f28b82]/15 text-[#9aa0a6] hover:text-[#f28b82] transition-colors"
+                      title="Xóa cell này"
                     >
-                      ×
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
