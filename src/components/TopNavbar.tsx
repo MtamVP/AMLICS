@@ -13,11 +13,14 @@ interface TopNavbarProps {
   cloudWorkerStatus: WorkerStatus;
   cloudHardware: HardwareInfo | null;
   isExecuting: boolean;
+  hasSubmissionCsv: boolean;
   onRunAllCells: () => void;
   onStopExecution: () => void;
   onOpenCloudModal: () => void;
   onExportIpynb: () => void;
+  onImportIpynbClick: () => void;
   onUploadCsvClick: () => void;
+  onDownloadSubmissionCsv: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -30,16 +33,19 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   cloudWorkerStatus,
   cloudHardware,
   isExecuting,
+  hasSubmissionCsv,
   onRunAllCells,
   onStopExecution,
   onOpenCloudModal,
   onExportIpynb,
+  onImportIpynbClick,
   onUploadCsvClick,
+  onDownloadSubmissionCsv,
 }) => {
   return (
-    <header className="h-11 px-3 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between gap-4 select-none shrink-0">
-      {/* Left: Minimal Colab/Kaggle style Brand + Notebook Filename + Plain Menu Actions */}
-      <div className="flex items-center gap-3 min-w-0">
+    <header className="h-11 px-3 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between gap-3 select-none shrink-0">
+      {/* Left: Brand, Notebook Filename & Menu Actions */}
+      <div className="flex items-center gap-2.5 min-w-0">
         <div className="flex items-center gap-2">
           <span className="font-mono font-bold text-xs px-1.5 py-0.5 rounded bg-[#303134] text-[#e8eaed] border border-[#3c4043] tracking-tight">
             AMLICS
@@ -49,7 +55,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               type="text"
               value={projectName}
               onChange={(e) => onProjectNameChange(e.target.value)}
-              className="bg-transparent text-xs font-medium text-[#e8eaed] hover:bg-[#303134] focus:bg-[#303134] px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-[#8ab4f8] w-48 truncate"
+              className="bg-transparent text-xs font-medium text-[#e8eaed] hover:bg-[#303134] focus:bg-[#303134] px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-[#8ab4f8] w-44 truncate"
               title="Rename notebook"
             />
             <span className="text-xs text-[#9aa0a6] font-mono">.ipynb</span>
@@ -58,7 +64,6 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
         <div className="h-4 w-[1px] bg-[#3c4043]" />
 
-        {/* Minimalist Colab Action Bar */}
         <div className="flex items-center gap-1">
           {isExecuting ? (
             <button
@@ -67,7 +72,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-[#3c4043] hover:bg-[#4b4f54] text-[#f28b82] transition-colors"
             >
               <Square className="w-3 h-3 fill-current" />
-              <span>Interrupt execution</span>
+              <span>Interrupt</span>
             </button>
           ) : (
             <button
@@ -83,22 +88,43 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
           <button
             type="button"
             onClick={onUploadCsvClick}
-            className="px-2.5 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors"
+            className="px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors"
           >
             Upload CSV
           </button>
 
           <button
             type="button"
-            onClick={onExportIpynb}
-            className="px-2.5 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors"
+            onClick={onImportIpynbClick}
+            className="px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors"
+            title="Import an existing .ipynb file from Kaggle or Colab"
           >
-            Download .ipynb
+            Import .ipynb
           </button>
+
+          <button
+            type="button"
+            onClick={onExportIpynb}
+            className="px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors"
+            title="Export notebook with all code, markdown, and plots to .ipynb"
+          >
+            Export .ipynb
+          </button>
+
+          {hasSubmissionCsv && (
+            <button
+              type="button"
+              onClick={onDownloadSubmissionCsv}
+              className="px-2 py-1 rounded text-xs font-mono bg-[#292a2d] hover:bg-[#35363a] text-[#81c995] border border-[#3c4043] transition-colors"
+              title="Download generated Kaggle submission.csv"
+            >
+              ↓ submission.csv
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Right: Colab-style Runtime Selector & Resource Pill */}
+      {/* Right: Runtime Selector & Resource Pill */}
       <div className="flex items-center gap-2">
         <div className="flex items-center bg-[#18191a] p-0.5 rounded border border-[#3c4043] text-xs">
           <button

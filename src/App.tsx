@@ -6,9 +6,13 @@ import { RightStudioPane } from './components/RightStudioPane';
 import { CloudConnectModal } from './components/CloudConnectModal';
 import {
   createDefaultPipelineConfig,
-  SAMPLE_DATASETS,
+  INITIAL_TITANIC_PROFILE,
+  PUBLIC_URL_PRESETS,
 } from './data/sampleDatasets';
-import { buildAllPipelineCells } from './engine/codeGenerator';
+import {
+  buildAllPipelineCells,
+  normalizeUrlForPython,
+} from './engine/codeGenerator';
 import {
   getOrInitSessionId,
   getStoredSupabaseCredentials,
@@ -17,6 +21,7 @@ import {
   SupabaseCloudBroker,
 } from './engine/supabaseCloudClient';
 import {
+  CellType,
   CliLogEntry,
   DataProfile,
   ExperimentRecord,
@@ -27,27 +32,54 @@ import {
   SupabaseCredentials,
   WorkerStatus,
 } from './types/studio';
-import { exportPipelineToIpynb } from './utils/ipynbExporter';
+import {
+  exportPipelineToIpynb,
+  parseImportedIpynb,
+} from './utils/ipynbExporter';
 
-const EXP_STORAGE_KEY = 'automl_studio_experiments_v1';
+const EXP_STORAGE_KEY = 'amlics_experiments_v2';
+const CONFIG_STORAGE_KEY = 'amlics_pipeline_config_v2';
+
+function triggerBrowserDownload(filename: string, textContent: string) {
+  const blob = new Blob([textContent], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 export function App() {
-  const [projectName, setProjectName] = useState<string>('AMLICS_Telco_Churn');
+  const [projectName, setProjectName] = useState<string>('AMLICS_Pipeline_Notebook');
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('pyodide');
 
-  const [config, setConfig] = useState<PipelineConfig>(() =>
-    createDefaultPipelineConfig('telco_churn')
-  );
+  const [config, setConfig] = useState<PipelineConfig>(() => {
+    try {
+      const saved = localStorage.getItem(CONFIG_STORAGE_KEY);
+      if (saved) return { ...createDefaultPipelineConfig(), ...JSON.parse(saved) };
+    } catch {
+      // ignore
+    }
+    return createDefaultPipelineConfig();
+  });
+
   const [dataProfile, setDataProfile] = useState<DataProfile | null>(
-    () => SAMPLE_DATASETS[0].initialProfile
+    () => INITIAL_TITANIC_PROFILE
   );
 
   const [cells, setCells] = useState<NotebookCell[]>(() =>
-    buildAllPipelineCells(createDefaultPipelineConfig('telco_churn'))
+    buildAllPipelineCells(createDefaultPipelineConfig())
   );
 
   const [runningCellId, setRunningCellId] = useState<string | null>(null);
   const [isPipelineRunning, setIsPipelineRunning] = useState<boolean>(false);
+  const [hasSubmissionCsv, setHasSubmissionCsv] = useState<boolean>(false);
+
+  const [urlLoading, setUrlLoading] = useState<boolean>(false);
+  const [urlError, setUrlError] = useState<string | null>(null);
 
   const [pyodideStatus, setPyodideStatus] = useState<WorkerStatus>('initializing');
   const [pyodideStatusText, setPyodideStatusText] = useState<string>(
@@ -83,7 +115,11 @@ export function App() {
   const cloudBrokerRef = useRef<SupabaseCloudBroker | null>(null);
   const pendingCellResolverRef = useRef<((success: boolean) => void) | null>(null);
   const stopRequestedRef = useRef<boolean>(false);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const trainCsvInputRef = useRef<HTMLInputElement | null>(null);
+  const testCsvInputRef = useRef<HTMLInputElement | null>(null);
+  const ipynbInputRef = useRef<HTMLInputElement | null>(null);
+  const lastProfileDatasetRef = useRef<string>('titanic.csv');
 
   const configRef = useRef(config);
   configRef.current = config;
@@ -114,6 +150,7 @@ export function App() {
     []
   );
 
+  // Auto-save experiments & config
   useEffect(() => {
     try {
       localStorage.setItem(EXP_STORAGE_KEY, JSON.stringify(experiments));
@@ -123,58 +160,102 @@ export function App() {
   }, [experiments]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(CONFIG_STORAGE_KEY, JSON.stringify(config));
+    } catch {
+      // ignore
+    }
+  }, [config]);
+
+  // Sync UI config -> code for unlocked pipeline cells
+  useEffect(() => {
     setCells((prevCells) => buildAllPipelineCells(config, prevCells));
   }, [config]);
 
-  const syncColumnsFromProfile = useCallback((profile: DataProfile) => {
-    setDataProfile(profile);
-    setConfig((prev) => {
-      const allColNames = profile.columns.map((c) => c.name);
-      if (
-        allColNames.includes(prev.targetColumn) &&
-        prev.numericColumns.some((c) => allColNames.includes(c))
-      ) {
-        return prev;
-      }
+  // Synchronize column roles whenever a new DataProfile arrives
+  const syncColumnsFromProfile = useCallback(
+    (profile: DataProfile, forceReinfer = false) => {
+      setDataProfile(profile);
+      const isNewDataset =
+        forceReinfer || profile.dataset_name !== lastProfileDatasetRef.current;
+      lastProfileDatasetRef.current = profile.dataset_name;
 
-      const targetCand =
-        profile.columns[profile.columns.length - 1]?.name || prev.targetColumn;
-      const targetMeta = profile.columns.find((c) => c.name === targetCand);
-      const inferredTask =
-        targetMeta && targetMeta.nunique <= 10 ? 'classification' : 'regression';
+      setConfig((prev) => {
+        const allColNames = profile.columns.map((c) => c.name);
+        if (
+          !isNewDataset &&
+          allColNames.includes(prev.targetColumn) &&
+          (prev.numericColumns.some((c) => allColNames.includes(c)) ||
+            prev.categoricalColumns.some((c) => allColNames.includes(c)))
+        ) {
+          return prev;
+        }
 
-      const dropCols = profile.columns
-        .filter((c) => c.name !== targetCand && c.inferred_type === 'text_or_id')
-        .map((c) => c.name);
+        // Choose the last non-ID column as Target by default
+        const nonIdCols = profile.columns.filter(
+          (c) => !c.is_id_like && !c.is_constant
+        );
+        const targetCand =
+          nonIdCols[nonIdCols.length - 1]?.name ||
+          profile.columns[profile.columns.length - 1]?.name ||
+          prev.targetColumn;
 
-      const numCols = profile.columns
-        .filter(
-          (c) =>
-            c.name !== targetCand &&
-            !dropCols.includes(c.name) &&
-            (c.inferred_type === 'numeric' || c.inferred_type === 'binary')
-        )
-        .map((c) => c.name);
+        const targetMeta = profile.columns.find((c) => c.name === targetCand);
+        const inferredTask =
+          targetMeta && targetMeta.nunique <= 12
+            ? 'classification'
+            : 'regression';
 
-      const catCols = profile.columns
-        .filter(
-          (c) =>
-            c.name !== targetCand &&
-            !dropCols.includes(c.name) &&
-            c.inferred_type === 'categorical'
-        )
-        .map((c) => c.name);
+        // Automatically drop all ID columns, constant columns, and high-cardinality text columns!
+        const dropCols = profile.columns
+          .filter(
+            (c) =>
+              c.name !== targetCand &&
+              (c.is_id_like ||
+                c.is_constant ||
+                c.inferred_type === 'id_or_constant' ||
+                c.inferred_type === 'text')
+          )
+          .map((c) => c.name);
 
-      return {
-        ...prev,
-        targetColumn: targetCand,
-        taskType: inferredTask,
-        dropColumns: dropCols,
-        numericColumns: numCols,
-        categoricalColumns: catCols,
-      };
-    });
-  }, []);
+        const firstIdCol =
+          profile.columns.find((c) => c.is_id_like)?.name ||
+          profile.columns[0]?.name ||
+          'id';
+
+        const numCols = profile.columns
+          .filter(
+            (c) =>
+              c.name !== targetCand &&
+              !dropCols.includes(c.name) &&
+              (c.inferred_type === 'numeric' || c.inferred_type === 'binary')
+          )
+          .map((c) => c.name);
+
+        const catCols = profile.columns
+          .filter(
+            (c) =>
+              c.name !== targetCand &&
+              !dropCols.includes(c.name) &&
+              c.inferred_type === 'categorical'
+          )
+          .map((c) => c.name);
+
+        return {
+          ...prev,
+          targetColumn: targetCand,
+          idColumnForSubmission: firstIdCol,
+          taskType: inferredTask,
+          cvStrategy:
+            inferredTask === 'classification' ? 'stratified_kfold' : 'kfold',
+          dropColumns: dropCols,
+          numericColumns: numCols,
+          categoricalColumns: catCols,
+        };
+      });
+    },
+    []
+  );
 
   const handleIncomingCellResult = useCallback(
     (payload: {
@@ -182,8 +263,10 @@ export function App() {
       status: 'success' | 'error' | 'stopped';
       duration_ms: number;
       stdout_summary?: string;
+      html_output?: string;
       figures_base64?: string[];
       experiment_record?: Record<string, unknown> | null;
+      has_submission_csv?: boolean;
       namespace_vars?: string[];
       runtime_info?: HardwareInfo;
     }) => {
@@ -192,8 +275,10 @@ export function App() {
         status,
         duration_ms,
         stdout_summary,
+        html_output,
         figures_base64,
         experiment_record,
+        has_submission_csv,
         namespace_vars,
         runtime_info,
       } = payload;
@@ -204,6 +289,9 @@ export function App() {
       if (runtime_info) {
         setCloudHardware(runtime_info);
       }
+      if (has_submission_csv) {
+        setHasSubmissionCsv(true);
+      }
 
       setCells((prev) =>
         prev.map((c) => {
@@ -212,7 +300,8 @@ export function App() {
             ...c,
             status,
             durationMs: duration_ms,
-            outputText: stdout_summary ? stdout_summary : c.outputText,
+            outputText: stdout_summary !== undefined ? stdout_summary : c.outputText,
+            htmlOutput: html_output,
             figures:
               figures_base64 && figures_base64.length > 0
                 ? figures_base64
@@ -237,6 +326,14 @@ export function App() {
             id: `exp_${Date.now()}`,
             runNumber: nextRunNum,
             timestamp: new Date().toLocaleTimeString(),
+            datasetName: String(
+              experiment_record.dataset_name ||
+                dataProfile?.dataset_name ||
+                'Dataset.csv'
+            ),
+            targetColumn: String(
+              experiment_record.target_column || curConfig.targetColumn
+            ),
             modelName: String(
               experiment_record.model_name || curConfig.modelFamily
             ),
@@ -253,6 +350,7 @@ export function App() {
               numericScaler: curConfig.numericScaler,
               categoricalEncoder: curConfig.categoricalEncoder,
               imbalanceStrategy: curConfig.imbalanceStrategy,
+              cvStrategy: curConfig.cvStrategy,
               cvFolds: curConfig.cvFolds,
               featureCount:
                 curConfig.numericColumns.length +
@@ -269,6 +367,7 @@ export function App() {
             durationMs: duration_ms,
             codeSnapshot: curCells.map((c) => ({
               title: c.title,
+              cellType: c.cellType,
               code: c.currentCode,
             })),
             configSnapshot: JSON.parse(JSON.stringify(curConfig)),
@@ -278,7 +377,7 @@ export function App() {
           cloudBrokerRef.current?.persistExperimentToDb(newExp);
           appendCliLog(
             'system',
-            `Recorded Run #${nextRunNum} (${newExp.modelName}) to Leaderboard.`
+            `Recorded Run #${nextRunNum} (${newExp.modelName}) on ${newExp.datasetName} to Leaderboard.`
           );
           return [newExp, ...prevExps];
         });
@@ -291,7 +390,7 @@ export function App() {
         resolve(status === 'success');
       }
     },
-    [appendCliLog]
+    [appendCliLog, dataProfile?.dataset_name]
   );
 
   const initPyodideWorker = useCallback(() => {
@@ -304,8 +403,18 @@ export function App() {
     );
 
     worker.onmessage = (event: MessageEvent) => {
-      const { type, status, message, cellId, stream, text, dataProfile: prof, payload, filename } =
-        event.data;
+      const {
+        type,
+        status,
+        message,
+        cellId,
+        stream,
+        text,
+        dataProfile: prof,
+        payload,
+        filename,
+        content,
+      } = event.data;
 
       if (type === 'status') {
         setPyodideStatus(status);
@@ -320,13 +429,24 @@ export function App() {
           );
         }
       } else if (type === 'data_profile' && prof) {
-        syncColumnsFromProfile(prof);
+        syncColumnsFromProfile(prof, false);
       } else if (type === 'csv_uploaded' && prof) {
-        syncColumnsFromProfile(prof);
+        syncColumnsFromProfile(prof, true);
+        const droppedIds = prof.columns
+          .filter((c: { is_id_like?: boolean; is_constant?: boolean }) => c.is_id_like || c.is_constant)
+          .map((c: { name: string }) => c.name);
         appendCliLog(
           'system',
-          `Loaded ${filename} (${prof.shape[0]} rows, ${prof.shape[1]} cols).`
+          `Loaded ${filename} (${prof.shape[0].toLocaleString()} rows, ${prof.shape[1]} cols).${
+            droppedIds.length > 0
+              ? ` Auto-dropped ID/Constant columns: [${droppedIds.join(', ')}]`
+              : ''
+          }`
         );
+      } else if (type === 'test_csv_uploaded') {
+        appendCliLog('system', `Loaded test dataset: ${filename} (for submission.csv).`);
+      } else if (type === 'submission_csv_content' && content) {
+        triggerBrowserDownload('submission.csv', content);
       } else if (type === 'cell_result' && payload) {
         handleIncomingCellResult(payload);
       }
@@ -360,12 +480,15 @@ export function App() {
         handleIncomingCellResult(payload);
       },
       onDataProfile: (prof) => {
-        syncColumnsFromProfile(prof);
+        syncColumnsFromProfile(prof, false);
       },
       onHeartbeat: (hb) => {
         setCloudWorkerStatus(hb.status === 'busy' ? 'busy' : 'idle');
         setCloudHardware(hb.runtime_info);
         if (hb.namespace_vars) setNamespaceVars(hb.namespace_vars);
+      },
+      onSubmissionCsv: (content) => {
+        triggerBrowserDownload('submission.csv', content);
       },
       onChannelStatus: (connected, msg) => {
         setCloudConnected(connected);
@@ -386,13 +509,21 @@ export function App() {
   const executeSingleCell = useCallback(
     (cellId: string): Promise<boolean> => {
       const targetCell = cellsRef.current.find((c) => c.id === cellId);
-      if (!targetCell) return Promise.resolve(false);
+      if (!targetCell || targetCell.cellType === 'markdown') {
+        return Promise.resolve(true);
+      }
 
       setRunningCellId(cellId);
       setCells((prev) =>
         prev.map((c) =>
           c.id === cellId
-            ? { ...c, status: 'running', outputText: '', figures: [] }
+            ? {
+                ...c,
+                status: 'running',
+                outputText: '',
+                htmlOutput: undefined,
+                figures: [],
+              }
             : c
         )
       );
@@ -424,6 +555,9 @@ export function App() {
               appendCliLog('stderr', `Cloud error: ${String(err)}`);
               setRunningCellId(null);
               pendingCellResolverRef.current = null;
+              setCells((prev) =>
+                prev.map((c) => (c.id === cellId ? { ...c, status: 'error' } : c))
+              );
               resolve(false);
             });
         } else {
@@ -441,26 +575,41 @@ export function App() {
     [appendCliLog, cloudConnected]
   );
 
-  const handleRunAllCells = useCallback(async () => {
-    if (runningCellId) return;
-    stopRequestedRef.current = false;
-    setIsPipelineRunning(true);
+  const handleRunFromCell = useCallback(
+    async (startCellId: string) => {
+      if (runningCellId) return;
+      stopRequestedRef.current = false;
+      setIsPipelineRunning(true);
 
-    for (const cell of cellsRef.current) {
-      if (stopRequestedRef.current) break;
-      const ok = await executeSingleCell(cell.id);
-      if (!ok || stopRequestedRef.current) {
-        break;
+      const startIdx = cellsRef.current.findIndex((c) => c.id === startCellId);
+      const slice =
+        startIdx >= 0 ? cellsRef.current.slice(startIdx) : cellsRef.current;
+
+      for (const cell of slice) {
+        if (stopRequestedRef.current) break;
+        if (cell.cellType === 'markdown') continue;
+        const ok = await executeSingleCell(cell.id);
+        if (!ok || stopRequestedRef.current) {
+          break;
+        }
       }
-    }
 
-    setIsPipelineRunning(false);
-    cloudBrokerRef.current?.persistStateToDb(
-      configRef.current,
-      cellsRef.current,
-      dataProfile
-    );
-  }, [runningCellId, executeSingleCell, dataProfile]);
+      setIsPipelineRunning(false);
+      cloudBrokerRef.current?.persistStateToDb(
+        configRef.current,
+        cellsRef.current,
+        dataProfile
+      );
+    },
+    [runningCellId, executeSingleCell, dataProfile]
+  );
+
+  const handleRunAllCells = useCallback(async () => {
+    const firstCell = cellsRef.current[0];
+    if (firstCell) {
+      await handleRunFromCell(firstCell.id);
+    }
+  }, [handleRunFromCell]);
 
   const handleStopExecution = useCallback(() => {
     stopRequestedRef.current = true;
@@ -470,7 +619,10 @@ export function App() {
       cloudBrokerRef.current?.sendStopCell();
       appendCliLog('system', 'Sent interrupt signal to Cloud Worker.');
     } else {
-      appendCliLog('system', 'Execution interrupted. Restarting local kernel...');
+      appendCliLog(
+        'system',
+        'Interrupted Browser Wasm worker. Restarting local Python kernel (in-memory variables cleared)...'
+      );
       initPyodideWorker();
       if (runningCellId) {
         setCells((prev) =>
@@ -479,7 +631,7 @@ export function App() {
               ? {
                   ...c,
                   status: 'stopped',
-                  outputText: c.outputText + '\nKeyboardInterrupt',
+                  outputText: c.outputText + '\nKeyboardInterrupt (Worker restarted)',
                 }
               : c
           )
@@ -500,7 +652,7 @@ export function App() {
           ? {
               ...c,
               currentCode: newCode,
-              isLocked: true,
+              isLocked: c.cellType === 'code' ? true : c.isLocked,
             }
           : c
       )
@@ -527,38 +679,187 @@ export function App() {
     );
   };
 
-  const handleAddCustomCell = () => {
-    const nextOrder = cells.length + 1;
-    const newCell: NotebookCell = {
-      id: `cell_custom_${Date.now()}`,
-      order: nextOrder,
-      stepType: 'custom',
-      title: `${nextOrder}. Custom Code`,
-      subtitle: 'Shared kernel namespace (df, X_train, full_pipeline)',
-      generatedCode: '',
-      currentCode: `# Custom analysis\ndf.head(3)`,
+  const handleInsertCellAt = (index: number, cellType: CellType) => {
+    const newCell: NotebookCell =
+      cellType === 'markdown'
+        ? {
+            id: `md_${Date.now()}`,
+            order: index + 1,
+            cellType: 'markdown',
+            stepType: 'markdown_doc',
+            title: 'Markdown Note',
+            subtitle: 'Documentation',
+            generatedCode: '',
+            currentCode: `### Notes\nWrite your analysis notes or markdown tables here. Double-click to edit, **Shift+Enter** to render.`,
+            isLocked: true,
+            status: 'idle',
+            outputText: '',
+            figures: [],
+          }
+        : {
+            id: `code_${Date.now()}`,
+            order: index + 1,
+            cellType: 'code',
+            stepType: 'custom',
+            title: 'Custom Code Cell',
+            subtitle: 'Shared kernel namespace (df, X_train, full_pipeline)',
+            generatedCode: '',
+            currentCode: `# Custom exploration (last expression renders automatically)\ndf.head(5)`,
+            isLocked: true,
+            status: 'idle',
+            outputText: '',
+            figures: [],
+          };
+
+    setCells((prev) => {
+      const copy = [...prev];
+      copy.splice(index, 0, newCell);
+      return copy.map((c, idx) => ({ ...c, order: idx + 1 }));
+    });
+  };
+
+  const handleMoveCell = (cellId: string, direction: 'up' | 'down') => {
+    setCells((prev) => {
+      const idx = prev.findIndex((c) => c.id === cellId);
+      if (idx < 0) return prev;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const copy = [...prev];
+      const [moved] = copy.splice(idx, 1);
+      copy.splice(targetIdx, 0, moved);
+      return copy.map((c, i) => ({ ...c, order: i + 1 }));
+    });
+  };
+
+  const handleDuplicateCell = (cellId: string) => {
+    setCells((prev) => {
+      const idx = prev.findIndex((c) => c.id === cellId);
+      if (idx < 0) return prev;
+      const orig = prev[idx];
+      const dup: NotebookCell = {
+        ...orig,
+        id: `${orig.cellType}_dup_${Date.now()}`,
+        stepType: orig.cellType === 'markdown' ? 'markdown_doc' : 'custom',
+        title: `${orig.title} (Copy)`,
+        isLocked: true,
+        status: 'idle',
+      };
+      const copy = [...prev];
+      copy.splice(idx + 1, 0, dup);
+      return copy.map((c, i) => ({ ...c, order: i + 1 }));
+    });
+  };
+
+  const handleDeleteCell = (cellId: string) => {
+    setCells((prev) =>
+      prev
+        .filter((c) => c.id !== cellId)
+        .map((c, i) => ({ ...c, order: i + 1 }))
+    );
+  };
+
+  const handleInsertMarkdownSummary = (exp: ExperimentRecord) => {
+    const m = exp.metrics;
+    const metricLines =
+      exp.taskType === 'classification'
+        ? `| Metric | Holdout Test | CV (${exp.preprocessingSummary.cvFolds}-Fold) | Train |\n| :--- | :--- | :--- | :--- |\n| **ROC-AUC** | \`${m.roc_auc ?? '-'}\` | \`${m.cv_mean ?? '-'} ± ${m.cv_std ?? '-'}\` | \`${m.train_score ?? '-'}\` |\n| **F1-Score** | \`${m.f1 ?? '-'}\` | - | - |\n| **Accuracy** | \`${m.accuracy ?? '-'}\` | - | - |`
+        : `| Metric | Holdout Test | CV (${exp.preprocessingSummary.cvFolds}-Fold) | Train |\n| :--- | :--- | :--- | :--- |\n| **RMSE** | \`${m.rmse ?? '-'}\` | \`${m.cv_mean ?? '-'}\` | \`${m.train_score ?? '-'}\` |\n| **MAE** | \`${m.mae ?? '-'}\` | - | - |\n| **R² Score** | \`${m.r2 ?? '-'}\` | - | - |`;
+
+    const mdText = `## Experiment Report — Run #${exp.runNumber}: ${exp.modelName}
+- **Dataset:** \`${exp.datasetName}\` | **Target:** \`${exp.targetColumn}\` | **Runtime:** \`${exp.runtimeUsed}\`
+- **Pipeline:** Imputer=\`${exp.preprocessingSummary.numericImputer}\`, Scaler=\`${exp.preprocessingSummary.numericScaler}\`, Encoder=\`${exp.preprocessingSummary.categoricalEncoder}\`, Validation=\`${exp.preprocessingSummary.cvStrategy}\`
+- **Hyperparameters:** \`n_estimators=${exp.hyperparameters.nEstimators}\`, \`lr=${exp.hyperparameters.learningRate}\`, \`max_depth=${exp.hyperparameters.maxDepth}\`
+
+${metricLines}`;
+
+    const reportCell: NotebookCell = {
+      id: `md_report_${Date.now()}`,
+      order: cells.length + 1,
+      cellType: 'markdown',
+      stepType: 'markdown_doc',
+      title: `Experiment Report: Run #${exp.runNumber} (${exp.modelName})`,
+      subtitle: 'Auto-generated summary',
+      generatedCode: mdText,
+      currentCode: mdText,
       isLocked: true,
       status: 'idle',
       outputText: '',
       figures: [],
     };
-    setCells((prev) => [...prev, newCell]);
+    setCells((prev) => [...prev, reportCell]);
+    appendCliLog('system', `Inserted Markdown summary cell for Run #${exp.runNumber}.`);
   };
 
-  const handleDeleteCustomCell = (cellId: string) => {
-    setCells((prev) => prev.filter((c) => c.id !== cellId));
+  // Load dataset from Public URL (with GitHub/GDrive normalization & CORS proxy fallback)
+  const handleFetchPublicUrl = async (rawUrl: string, presetId?: string) => {
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return;
+    setUrlError(null);
+    setUrlLoading(true);
+
+    const normalized = normalizeUrlForPython(trimmed);
+    const filename =
+      normalized.split('/').pop()?.split('?')[0] || 'remote_dataset.csv';
+
+    try {
+      let resp: Response;
+      try {
+        resp = await fetch(normalized);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      } catch {
+        // Fallback to Cloudflare Pages CORS Proxy Function
+        resp = await fetch(`/api/proxy-csv?url=${encodeURIComponent(normalized)}`);
+      }
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(errText || `HTTP ${resp.status}`);
+      }
+
+      const csvText = await resp.text();
+      if (!csvText.trim() || csvText.trim().startsWith('<!DOCTYPE html')) {
+        throw new Error(
+          'URL returned HTML instead of CSV data. Make sure the link points to a raw CSV file.'
+        );
+      }
+
+      pyodideWorkerRef.current?.postMessage({
+        type: 'write_csv',
+        payload: {
+          filename,
+          content: csvText,
+          isTestFile: false,
+          alsoCacheAsUrl: true,
+        },
+      });
+
+      const preset = PUBLIC_URL_PRESETS.find((p) => p.id === presetId);
+      setConfig((prev) => ({
+        ...prev,
+        datasetSource: 'public_url',
+        publicDatasetUrl: normalized,
+        ...(preset
+          ? {
+              targetColumn: preset.targetColumn,
+              idColumnForSubmission: preset.idColumn,
+              taskType: preset.taskType,
+              dropColumns: preset.dropColumns,
+            }
+          : {}),
+      }));
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setUrlError(`Failed to load URL (${msg}). Check CORS or URL path.`);
+      appendCliLog('stderr', `URL load error: ${msg}`);
+    } finally {
+      setUrlLoading(false);
+    }
   };
 
-  const handleSelectSampleDataset = (sampleId: string) => {
-    const sample =
-      SAMPLE_DATASETS.find((s) => s.id === sampleId) || SAMPLE_DATASETS[0];
-    const nextCfg = createDefaultPipelineConfig(sample.id);
-    setDataProfile(sample.initialProfile);
-    setConfig(nextCfg);
-  };
-
-  const handleCsvFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload Train CSV
+  const handleTrainCsvChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
 
     const textContent = await file.text();
@@ -569,6 +870,7 @@ export function App() {
       payload: {
         filename: safeFilename,
         content: textContent,
+        isTestFile: false,
       },
     });
 
@@ -579,12 +881,70 @@ export function App() {
 
     setConfig((prev) => ({
       ...prev,
-      datasetSource: publicUrl && runtimeMode === 'cloud' ? 'cloud_url' : 'upload',
+      datasetSource: 'upload',
       uploadedFileName: safeFilename,
-      cloudDatasetUrl: publicUrl || prev.cloudDatasetUrl,
+      cloudDatasetPath: publicUrl || prev.cloudDatasetPath,
+      // Auto-enable 10k row subsampling if file > 15MB in browser Wasm
+      subsampleRows:
+        runtimeMode === 'pyodide' && file.size > 15 * 1024 * 1024 ? 10000 : 0,
     }));
+  };
 
+  // Upload Test CSV (for submission.csv)
+  const handleTestCsvChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     e.target.value = '';
+    if (!file) return;
+
+    const textContent = await file.text();
+    const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+    pyodideWorkerRef.current?.postMessage({
+      type: 'write_csv',
+      payload: {
+        filename: safeFilename,
+        content: textContent,
+        isTestFile: true,
+      },
+    });
+
+    setConfig((prev) => ({
+      ...prev,
+      testUploadedFileName: safeFilename,
+    }));
+  };
+
+  // Import .ipynb
+  const handleIpynbFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const importedCells = parseImportedIpynb(text);
+      if (importedCells.length > 0) {
+        setCells(importedCells);
+        setProjectName(file.name.replace(/\.ipynb$/i, ''));
+        appendCliLog(
+          'system',
+          `Imported ${importedCells.length} cells from ${file.name}.`
+        );
+      }
+    } catch (err) {
+      appendCliLog(
+        'stderr',
+        `Failed to import .ipynb: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  };
+
+  const handleDownloadSubmissionCsv = () => {
+    if (runtimeMode === 'cloud' && cloudBrokerRef.current && cloudConnected) {
+      cloudBrokerRef.current.requestSubmissionDownload();
+    } else {
+      pyodideWorkerRef.current?.postMessage({ type: 'download_submission' });
+    }
   };
 
   const handleRestoreExperiment = (exp: ExperimentRecord) => {
@@ -601,6 +961,7 @@ export function App() {
       cloudBrokerRef.current.sendRunCell({
         id: 'quick_repl',
         order: 99,
+        cellType: 'code',
         stepType: 'custom',
         title: 'REPL',
         subtitle: '',
@@ -625,11 +986,26 @@ export function App() {
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#18191a] text-[#e8eaed]">
+      {/* Hidden File Inputs */}
       <input
-        ref={fileInputRef}
+        ref={trainCsvInputRef}
         type="file"
         accept=".csv,text/csv"
-        onChange={handleCsvFileChange}
+        onChange={handleTrainCsvChange}
+        className="hidden"
+      />
+      <input
+        ref={testCsvInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        onChange={handleTestCsvChange}
+        className="hidden"
+      />
+      <input
+        ref={ipynbInputRef}
+        type="file"
+        accept=".ipynb,application/json"
+        onChange={handleIpynbFileChange}
         className="hidden"
       />
 
@@ -644,21 +1020,33 @@ export function App() {
         cloudWorkerStatus={cloudWorkerStatus}
         cloudHardware={cloudHardware}
         isExecuting={runningCellId !== null || isPipelineRunning}
+        hasSubmissionCsv={hasSubmissionCsv}
         onRunAllCells={handleRunAllCells}
         onStopExecution={handleStopExecution}
         onOpenCloudModal={() => setIsCloudModalOpen(true)}
         onExportIpynb={() => exportPipelineToIpynb(projectName, config, cells)}
-        onUploadCsvClick={() => fileInputRef.current?.click()}
+        onImportIpynbClick={() => ipynbInputRef.current?.click()}
+        onUploadCsvClick={() => trainCsvInputRef.current?.click()}
+        onDownloadSubmissionCsv={handleDownloadSubmissionCsv}
       />
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-[290px] xl:w-[320px] shrink-0 h-full overflow-hidden">
+        <div className="w-[300px] xl:w-[330px] shrink-0 h-full overflow-hidden">
           <LeftPipelineSidebar
             config={config}
+            runtimeMode={runtimeMode}
             dataProfile={dataProfile}
+            availableCloudFiles={cloudHardware?.available_files || []}
+            urlLoading={urlLoading}
+            urlError={urlError}
             onChangeConfig={setConfig}
-            onSelectSampleDataset={handleSelectSampleDataset}
-            onUploadCsvClick={() => fileInputRef.current?.click()}
+            onUploadCsvClick={() => trainCsvInputRef.current?.click()}
+            onUploadTestCsvClick={() => testCsvInputRef.current?.click()}
+            onFetchPublicUrl={handleFetchPublicUrl}
+            onSwitchToCloud={() => {
+              setRuntimeMode('cloud');
+              setIsCloudModalOpen(true);
+            }}
           />
         </div>
 
@@ -667,16 +1055,19 @@ export function App() {
             cells={cells}
             runningCellId={runningCellId}
             onRunCell={executeSingleCell}
+            onRunFromCell={handleRunFromCell}
             onStopCell={handleStopExecution}
             onEditCellCode={handleEditCellCode}
             onToggleLockCell={handleToggleLockCell}
             onResetCellToTemplate={handleResetCellToTemplate}
-            onAddCustomCell={handleAddCustomCell}
-            onDeleteCustomCell={handleDeleteCustomCell}
+            onInsertCellAt={handleInsertCellAt}
+            onMoveCell={handleMoveCell}
+            onDuplicateCell={handleDuplicateCell}
+            onDeleteCell={handleDeleteCell}
           />
         </div>
 
-        <div className="w-[360px] xl:w-[400px] shrink-0 h-full overflow-hidden">
+        <div className="w-[360px] xl:w-[410px] shrink-0 h-full overflow-hidden">
           <RightStudioPane
             taskType={config.taskType}
             dataProfile={dataProfile}
@@ -684,6 +1075,7 @@ export function App() {
             selectedExpId={selectedExpId}
             onSelectExperiment={setSelectedExpId}
             onRestoreExperiment={handleRestoreExperiment}
+            onInsertMarkdownSummary={handleInsertMarkdownSummary}
             onClearExperiments={() => setExperiments([])}
             cliLogs={cliLogs}
             onClearLogs={() => setCliLogs([])}
@@ -693,7 +1085,7 @@ export function App() {
         </div>
       </div>
 
-      {/* Minimal Colab-style Bottom Status Bar */}
+      {/* Bottom Status Bar */}
       <footer className="h-6 px-3 bg-[#202124] border-t border-[#3c4043] flex items-center justify-between text-[11px] text-[#9aa0a6] select-none shrink-0 font-mono">
         <div className="flex items-center gap-3">
           <span>
@@ -703,11 +1095,17 @@ export function App() {
               ? `Connected (${cloudHardware?.platform} • ${cloudHardware?.gpu})`
               : 'Remote disconnected'}
           </span>
+          {config.subsampleRows > 0 && (
+            <span className="text-[#fdd663]">
+              • Subsampling: {config.subsampleRows.toLocaleString()} rows
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-3">
           <span>
-            {dataProfile?.dataset_name} ({dataProfile?.shape[0]}×{dataProfile?.shape[1]})
+            {dataProfile?.dataset_name} ({dataProfile?.shape[0].toLocaleString()}×
+            {dataProfile?.shape[1]})
           </span>
           <span>•</span>
           <span>{config.modelFamily}</span>

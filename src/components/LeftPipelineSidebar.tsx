@@ -1,24 +1,33 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { SAMPLE_DATASETS } from '../data/sampleDatasets';
+import { PUBLIC_URL_PRESETS } from '../data/sampleDatasets';
 import {
   CategoricalEncoderStrategy,
   CategoricalImputerStrategy,
+  CVStrategy,
   DataProfile,
   ImbalanceStrategy,
   ModelFamily,
   NumericImputerStrategy,
   NumericScalerStrategy,
   PipelineConfig,
+  RuntimeMode,
   TaskType,
+  TuningStrategy,
 } from '../types/studio';
 
 interface LeftPipelineSidebarProps {
   config: PipelineConfig;
+  runtimeMode: RuntimeMode;
   dataProfile: DataProfile | null;
+  availableCloudFiles: string[];
+  urlLoading: boolean;
+  urlError: string | null;
   onChangeConfig: (updater: (prev: PipelineConfig) => PipelineConfig) => void;
-  onSelectSampleDataset: (sampleId: string) => void;
   onUploadCsvClick: () => void;
+  onUploadTestCsvClick: () => void;
+  onFetchPublicUrl: (url: string, presetId?: string) => void;
+  onSwitchToCloud: () => void;
 }
 
 const MODEL_OPTIONS: { id: ModelFamily; label: string }[] = [
@@ -34,10 +43,16 @@ const MODEL_OPTIONS: { id: ModelFamily; label: string }[] = [
 
 export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   config,
+  runtimeMode,
   dataProfile,
+  availableCloudFiles,
+  urlLoading,
+  urlError,
   onChangeConfig,
-  onSelectSampleDataset,
   onUploadCsvClick,
+  onUploadTestCsvClick,
+  onFetchPublicUrl,
+  onSwitchToCloud,
 }) => {
   const [openSection, setOpenSection] = useState<number>(1);
 
@@ -46,6 +61,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   };
 
   const columns = dataProfile?.columns || [];
+  const totalRows = dataProfile?.shape[0] || 0;
 
   const handleRoleToggle = (colName: string, role: 'numeric' | 'categorical' | 'drop') => {
     if (colName === config.targetColumn) return;
@@ -70,12 +86,14 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   const handleTargetChange = (newTarget: string) => {
     const colMeta = columns.find((c) => c.name === newTarget);
     const guessedTask: TaskType =
-      colMeta && colMeta.nunique <= 10 ? 'classification' : config.taskType;
+      colMeta && colMeta.nunique <= 12 ? 'classification' : 'regression';
 
     onChangeConfig((prev) => ({
       ...prev,
       targetColumn: newTarget,
       taskType: guessedTask,
+      cvStrategy:
+        guessedTask === 'classification' ? 'stratified_kfold' : 'kfold',
       numericColumns: prev.numericColumns.filter((c) => c !== newTarget),
       categoricalColumns: prev.categoricalColumns.filter((c) => c !== newTarget),
       dropColumns: prev.dropColumns.filter((c) => c !== newTarget),
@@ -84,7 +102,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
   return (
     <aside className="w-full h-full bg-[#202124] border-r border-[#3c4043] flex flex-col overflow-hidden select-none">
-      {/* Minimal Header */}
+      {/* Header */}
       <div className="px-3.5 py-2.5 border-b border-[#3c4043] flex items-center justify-between">
         <span className="text-xs font-semibold text-[#e8eaed]">
           Pipeline Configuration
@@ -94,7 +112,46 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
         </span>
       </div>
 
-      {/* Accordion Sections */}
+      {/* Large Dataset Warning Banner in Browser Wasm */}
+      {runtimeMode === 'pyodide' && totalRows > 30000 && (
+        <div className="px-3 py-2 bg-[#2d261b] border-b border-[#fdd663]/40 space-y-1.5 text-[11px]">
+          <div className="text-[#fdd663] font-medium">
+            Large Dataset ({totalRows.toLocaleString()} rows × {dataProfile?.shape[1]} cols)
+          </div>
+          <p className="text-[#e8eaed]/80 leading-snug">
+            Running full CV in Browser Wasm may exceed memory. Subsample for quick prototyping or switch to Colab/Kaggle.
+          </p>
+          <div className="flex items-center gap-1.5 pt-0.5">
+            <button
+              type="button"
+              onClick={() =>
+                onChangeConfig((p) => ({
+                  ...p,
+                  subsampleRows: p.subsampleRows === 10000 ? 0 : 10000,
+                }))
+              }
+              className={`px-2 py-0.5 rounded font-mono text-[10px] border ${
+                config.subsampleRows === 10000
+                  ? 'bg-[#fdd663] text-[#202124] border-[#fdd663] font-semibold'
+                  : 'bg-[#202124] text-[#fdd663] border-[#fdd663]/50'
+              }`}
+            >
+              {config.subsampleRows === 10000
+                ? '✓ Subsampled (10k)'
+                : 'Subsample 10k rows'}
+            </button>
+            <button
+              type="button"
+              onClick={onSwitchToCloud}
+              className="px-2 py-0.5 rounded font-mono text-[10px] bg-[#303134] hover:bg-[#3c4043] text-[#8ab4f8]"
+            >
+              Use Colab/Kaggle ↗
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Accordion Steps */}
       <div className="flex-1 overflow-y-auto divide-y divide-[#3c4043] custom-scrollbar">
         {/* ==================== 1. DATASET & TARGET ==================== */}
         <div>
@@ -104,7 +161,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
             className="w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-[#292a2d] transition-colors text-left"
           >
             <span className="text-xs font-medium text-[#e8eaed]">
-              1. Dataset & Feature Roles
+              1. Data Source & Schema
             </span>
             {openSection === 1 ? (
               <ChevronDown className="w-3.5 h-3.5 text-[#9aa0a6]" />
@@ -115,100 +172,240 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
           {openSection === 1 && (
             <div className="px-3.5 pb-3.5 pt-1 space-y-3 bg-[#18191a]">
-              {/* Source Tabs */}
+              {/* Source Tabs: Upload | URL | Colab/Kaggle Path */}
               <div className="grid grid-cols-3 gap-1 p-0.5 rounded bg-[#202124] border border-[#3c4043] text-[11px]">
                 <button
                   type="button"
                   onClick={() =>
-                    onChangeConfig((p) => ({ ...p, datasetSource: 'sample' }))
+                    onChangeConfig((p) => ({ ...p, datasetSource: 'upload' }))
                   }
-                  className={`py-1 rounded-sm transition-colors ${
-                    config.datasetSource === 'sample'
-                      ? 'bg-[#303134] text-[#e8eaed] font-medium'
-                      : 'text-[#9aa0a6] hover:text-[#e8eaed]'
-                  }`}
-                >
-                  Sample
-                </button>
-                <button
-                  type="button"
-                  onClick={onUploadCsvClick}
                   className={`py-1 rounded-sm transition-colors ${
                     config.datasetSource === 'upload'
                       ? 'bg-[#303134] text-[#e8eaed] font-medium'
                       : 'text-[#9aa0a6] hover:text-[#e8eaed]'
                   }`}
                 >
-                  Local CSV
+                  Upload CSV
                 </button>
                 <button
                   type="button"
                   onClick={() =>
-                    onChangeConfig((p) => ({ ...p, datasetSource: 'cloud_url' }))
+                    onChangeConfig((p) => ({ ...p, datasetSource: 'public_url' }))
                   }
                   className={`py-1 rounded-sm transition-colors ${
-                    config.datasetSource === 'cloud_url'
+                    config.datasetSource === 'public_url'
                       ? 'bg-[#303134] text-[#e8eaed] font-medium'
                       : 'text-[#9aa0a6] hover:text-[#e8eaed]'
                   }`}
                 >
-                  URL / Path
+                  Public URL
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChangeConfig((p) => ({ ...p, datasetSource: 'cloud_path' }))
+                  }
+                  className={`py-1 rounded-sm transition-colors ${
+                    config.datasetSource === 'cloud_path'
+                      ? 'bg-[#303134] text-[#e8eaed] font-medium'
+                      : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+                  }`}
+                >
+                  Colab/Kaggle
                 </button>
               </div>
 
-              {config.datasetSource === 'sample' && (
-                <div>
-                  <label className="text-[11px] text-[#9aa0a6] block mb-1">
-                    Dataset
-                  </label>
-                  <select
-                    value={config.sampleDatasetId}
-                    onChange={(e) => onSelectSampleDataset(e.target.value)}
-                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8]"
-                  >
-                    {SAMPLE_DATASETS.map((ds) => (
-                      <option key={ds.id} value={ds.id}>
-                        {ds.name} ({ds.rowsCount} rows)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
+              {/* Tab A: Upload Local CSV (train.csv + optional test.csv) */}
               {config.datasetSource === 'upload' && (
-                <div className="p-2.5 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between">
-                  <span className="text-xs font-mono text-[#e8eaed] truncate">
-                    {config.uploadedFileName || 'No file selected'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={onUploadCsvClick}
-                    className="px-2 py-1 rounded bg-[#303134] hover:bg-[#3c4043] text-[#e8eaed] text-[11px] shrink-0"
-                  >
-                    Browse...
-                  </button>
+                <div className="space-y-2">
+                  <div className="p-2 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[10px] text-[#9aa0a6]">Train Dataset</div>
+                      <div className="text-xs font-mono text-[#e8eaed] truncate">
+                        {config.uploadedFileName || 'No file uploaded'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onUploadCsvClick}
+                      className="px-2 py-1 rounded bg-[#303134] hover:bg-[#3c4043] text-[#e8eaed] text-[11px] shrink-0"
+                    >
+                      Select train.csv
+                    </button>
+                  </div>
+
+                  <div className="p-2 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-[10px] text-[#9aa0a6]">
+                        Test Dataset (Optional — for submission.csv)
+                      </div>
+                      <div className="text-xs font-mono text-[#9aa0a6] truncate">
+                        {config.testUploadedFileName || 'None (uses holdout split)'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={onUploadTestCsvClick}
+                      className="px-2 py-1 rounded bg-[#292a2d] hover:bg-[#3c4043] text-[#9aa0a6] hover:text-[#e8eaed] text-[11px] shrink-0"
+                    >
+                      Select test.csv
+                    </button>
+                  </div>
                 </div>
               )}
 
-              {config.datasetSource === 'cloud_url' && (
-                <div>
-                  <label className="text-[11px] text-[#9aa0a6] block mb-1">
-                    CSV Path or URL
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="/kaggle/input/... or https://..."
-                    value={config.cloudDatasetUrl}
-                    onChange={(e) =>
-                      onChangeConfig((p) => ({
-                        ...p,
-                        cloudDatasetUrl: e.target.value,
-                      }))
-                    }
-                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] font-mono focus:outline-none focus:border-[#8ab4f8]"
-                  />
+              {/* Tab B: Public URL (GitHub, Google Drive, HuggingFace, Preset Real CSVs) */}
+              {config.datasetSource === 'public_url' && (
+                <div className="space-y-2">
+                  <div>
+                    <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                      Quick real dataset presets
+                    </label>
+                    <select
+                      value=""
+                      onChange={(e) => {
+                        const preset = PUBLIC_URL_PRESETS.find(
+                          (p) => p.id === e.target.value
+                        );
+                        if (preset) {
+                          onFetchPublicUrl(preset.url, preset.id);
+                        }
+                      }}
+                      className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
+                    >
+                      <option value="">-- Choose a real CSV benchmark --</option>
+                      {PUBLIC_URL_PRESETS.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                      Direct CSV / GitHub blob / Google Drive URL
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        placeholder="https://raw.githubusercontent.com/.../data.csv"
+                        value={config.publicDatasetUrl}
+                        onChange={(e) =>
+                          onChangeConfig((p) => ({
+                            ...p,
+                            publicDatasetUrl: e.target.value,
+                          }))
+                        }
+                        className="flex-1 bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed] font-mono focus:outline-none focus:border-[#8ab4f8]"
+                      />
+                      <button
+                        type="button"
+                        disabled={urlLoading}
+                        onClick={() => onFetchPublicUrl(config.publicDatasetUrl)}
+                        className="px-2.5 py-1 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] disabled:opacity-50 text-[#202124] text-xs font-medium shrink-0"
+                      >
+                        {urlLoading ? '...' : 'Load'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {urlError && (
+                    <div className="p-2 rounded bg-[#3c1f1f] border border-[#f28b82]/40 text-[11px] text-[#f28b82]">
+                      {urlError}
+                    </div>
+                  )}
                 </div>
               )}
+
+              {/* Tab C: Colab / Kaggle Local Path */}
+              {config.datasetSource === 'cloud_path' && (
+                <div className="space-y-2">
+                  {runtimeMode === 'pyodide' ? (
+                    <div className="p-2.5 rounded bg-[#202124] border border-[#3c4043] space-y-1.5 text-[11px] text-[#9aa0a6]">
+                      <div>
+                        Filesystem paths like <code>/kaggle/input/...</code> or <code>/content/...</code> only exist on the remote Colab/Kaggle machine.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={onSwitchToCloud}
+                        className="px-2.5 py-1 rounded bg-[#303134] hover:bg-[#3c4043] text-[#8ab4f8] text-xs font-medium"
+                      >
+                        Switch to Colab / Kaggle Runtime
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                          Remote file path on Colab / Kaggle
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="/kaggle/input/competition/train.csv"
+                          value={config.cloudDatasetPath}
+                          onChange={(e) =>
+                            onChangeConfig((p) => ({
+                              ...p,
+                              cloudDatasetPath: e.target.value,
+                            }))
+                          }
+                          className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] font-mono focus:outline-none focus:border-[#8ab4f8]"
+                        />
+                      </div>
+
+                      {availableCloudFiles.length > 0 && (
+                        <div>
+                          <span className="text-[10px] text-[#9aa0a6] block mb-1">
+                            Discovered files on worker ({availableCloudFiles.length}):
+                          </span>
+                          <div className="max-h-28 overflow-y-auto rounded border border-[#3c4043] bg-[#202124] divide-y divide-[#292a2d]">
+                            {availableCloudFiles.map((fp) => (
+                              <button
+                                key={fp}
+                                type="button"
+                                onClick={() =>
+                                  onChangeConfig((p) => ({
+                                    ...p,
+                                    cloudDatasetPath: fp,
+                                  }))
+                                }
+                                className="w-full text-left px-2 py-1 text-[10px] font-mono text-[#8ab4f8] hover:bg-[#292a2d] truncate"
+                              >
+                                {fp}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* Active Dataset Summary + Subsampling Control */}
+              <div className="p-2 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between text-[11px]">
+                <span className="font-mono text-[#e8eaed] truncate">
+                  Active: <strong>{dataProfile?.dataset_name}</strong> ({totalRows.toLocaleString()}×
+                  {dataProfile?.shape[1]})
+                </span>
+                <select
+                  value={config.subsampleRows}
+                  onChange={(e) =>
+                    onChangeConfig((p) => ({
+                      ...p,
+                      subsampleRows: Number(e.target.value),
+                    }))
+                  }
+                  className="bg-[#18191a] border border-[#3c4043] rounded px-1.5 py-0.5 text-[10px] font-mono text-[#9aa0a6]"
+                  title="Row subsampling limit"
+                >
+                  <option value={0}>Full rows</option>
+                  <option value={5000}>Sample 5k</option>
+                  <option value={10000}>Sample 10k</option>
+                  <option value={25000}>Sample 25k</option>
+                </select>
+              </div>
 
               {/* Target & Task */}
               <div className="grid grid-cols-2 gap-2">
@@ -249,15 +446,15 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                 </div>
               </div>
 
-              {/* Feature Role Table */}
+              {/* Feature Role Matrix */}
               <div>
                 <div className="flex items-center justify-between text-[11px] text-[#9aa0a6] mb-1">
-                  <span>Columns ({columns.length - 1})</span>
+                  <span>Features ({Math.max(0, columns.length - 1)})</span>
                   <span className="font-mono text-[10px]">
                     num:{config.numericColumns.length} cat:{config.categoricalColumns.length} drop:{config.dropColumns.length}
                   </span>
                 </div>
-                <div className="max-h-44 overflow-y-auto rounded border border-[#3c4043] bg-[#202124] divide-y divide-[#292a2d]">
+                <div className="max-h-48 overflow-y-auto rounded border border-[#3c4043] bg-[#202124] divide-y divide-[#292a2d]">
                   {columns
                     .filter((c) => c.name !== config.targetColumn)
                     .map((col) => {
@@ -269,7 +466,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                           key={col.name}
                           className="px-2 py-1.5 flex items-center justify-between gap-1 text-[11px]"
                         >
-                          <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                          <div className="min-w-0 flex-1 flex items-center gap-1">
                             <span
                               className={`font-mono truncate ${
                                 isDrop ? 'line-through text-[#5f6368]' : 'text-[#e8eaed]'
@@ -278,9 +475,22 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                             >
                               {col.name}
                             </span>
+                            {col.is_id_like && (
+                              <span
+                                className="px-1 rounded-sm bg-[#3c4043] text-[#fdd663] font-mono text-[9px]"
+                                title="Auto-detected identifier column -> Dropped to prevent overfitting/leakage"
+                              >
+                                ID
+                              </span>
+                            )}
+                            {col.is_constant && (
+                              <span className="px-1 rounded-sm bg-[#3c4043] text-[#f28b82] font-mono text-[9px]">
+                                Const
+                              </span>
+                            )}
                             {col.missing_pct > 0 && (
-                              <span className="text-[10px] font-mono text-[#9aa0a6]">
-                                ({col.missing_pct}% NaN)
+                              <span className="text-[9px] font-mono text-[#9aa0a6]">
+                                {col.missing_pct}%NaN
                               </span>
                             )}
                           </div>
@@ -336,7 +546,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
             className="w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-[#292a2d] transition-colors text-left"
           >
             <span className="text-xs font-medium text-[#e8eaed]">
-              2. Preprocessing (ColumnTransformer)
+              2. Preprocessing & Feature Eng.
             </span>
             {openSection === 2 ? (
               <ChevronDown className="w-3.5 h-3.5 text-[#9aa0a6]" />
@@ -349,7 +559,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
             <div className="px-3.5 pb-3.5 pt-1 space-y-3 bg-[#18191a]">
               <div className="space-y-2">
                 <span className="text-[11px] font-medium text-[#9aa0a6] block">
-                  Numeric features
+                  Numeric pipeline
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -408,11 +618,26 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                   />
                   <span>add_indicator=True (Missing mask)</span>
                 </label>
+
+                <label className="flex items-center gap-2 text-xs text-[#9aa0a6] hover:text-[#e8eaed] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.logTransformNumeric}
+                    onChange={() =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        logTransformNumeric: !p.logTransformNumeric,
+                      }))
+                    }
+                    className="accent-[#8ab4f8]"
+                  />
+                  <span>FunctionTransformer (np.log1p skew fix)</span>
+                </label>
               </div>
 
               <div className="space-y-2 pt-2 border-t border-[#292a2d]">
                 <span className="text-[11px] font-medium text-[#9aa0a6] block">
-                  Categorical features
+                  Categorical pipeline
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
@@ -465,7 +690,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
             className="w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-[#292a2d] transition-colors text-left"
           >
             <span className="text-xs font-medium text-[#e8eaed]">
-              3. Validation & Class Balance
+              3. Validation & Anti-Leakage Split
             </span>
             {openSection === 3 ? (
               <ChevronDown className="w-3.5 h-3.5 text-[#9aa0a6]" />
@@ -476,6 +701,52 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
           {openSection === 3 && (
             <div className="px-3.5 pb-3.5 pt-1 space-y-3 bg-[#18191a]">
+              <div>
+                <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                  Cross-Validation Strategy
+                </label>
+                <select
+                  value={config.cvStrategy}
+                  onChange={(e) =>
+                    onChangeConfig((p) => ({
+                      ...p,
+                      cvStrategy: e.target.value as CVStrategy,
+                    }))
+                  }
+                  className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] font-mono"
+                >
+                  <option value="stratified_kfold">StratifiedKFold (Standard Classif.)</option>
+                  <option value="kfold">KFold (Standard Regress.)</option>
+                  <option value="group_kfold">GroupKFold (Prevent Group Leakage)</option>
+                  <option value="timeseries_split">TimeSeriesSplit (Prevent Look-ahead Leakage)</option>
+                </select>
+              </div>
+
+              {config.cvStrategy === 'group_kfold' && (
+                <div>
+                  <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                    Group Column (for GroupKFold)
+                  </label>
+                  <select
+                    value={config.groupColumn}
+                    onChange={(e) =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        groupColumn: e.target.value,
+                      }))
+                    }
+                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed] font-mono"
+                  >
+                    <option value="">-- Auto select first column --</option>
+                    {columns.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="text-[10px] text-[#9aa0a6] block mb-1">
@@ -520,48 +791,31 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
               </div>
 
               {config.taskType === 'classification' && (
-                <>
-                  <div>
-                    <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                      Imbalance handling
-                    </label>
-                    <select
-                      value={config.imbalanceStrategy}
-                      onChange={(e) =>
-                        onChangeConfig((p) => ({
-                          ...p,
-                          imbalanceStrategy: e.target.value as ImbalanceStrategy,
-                        }))
-                      }
-                      className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed]"
-                    >
-                      <option value="class_weight">class_weight='balanced'</option>
-                      <option value="random_oversample">Random Oversample (train fold)</option>
-                      <option value="none">None</option>
-                    </select>
-                  </div>
-
-                  <label className="flex items-center gap-2 text-xs text-[#9aa0a6] hover:text-[#e8eaed] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={config.stratifiedCV}
-                      onChange={() =>
-                        onChangeConfig((p) => ({
-                          ...p,
-                          stratifiedCV: !p.stratifiedCV,
-                        }))
-                      }
-                      className="accent-[#8ab4f8]"
-                    />
-                    <span>Stratified split & K-Fold</span>
+                <div>
+                  <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                    Imbalance handling
                   </label>
-                </>
+                  <select
+                    value={config.imbalanceStrategy}
+                    onChange={(e) =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        imbalanceStrategy: e.target.value as ImbalanceStrategy,
+                      }))
+                    }
+                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed]"
+                  >
+                    <option value="class_weight">class_weight='balanced'</option>
+                    <option value="random_oversample">Random Oversample (train fold)</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
               )}
             </div>
           )}
         </div>
 
-        {/* ==================== 4. MODEL & HYPERPARAMETERS ==================== */}
+        {/* ==================== 4. MODEL, HYPERPARAMETERS & TUNING ==================== */}
         <div>
           <button
             type="button"
@@ -569,7 +823,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
             className="w-full px-3.5 py-2.5 flex items-center justify-between hover:bg-[#292a2d] transition-colors text-left"
           >
             <span className="text-xs font-medium text-[#e8eaed]">
-              4. Estimator & Hyperparameters
+              4. Estimator & Hyperparameter Tuning
             </span>
             {openSection === 4 ? (
               <ChevronDown className="w-3.5 h-3.5 text-[#9aa0a6]" />
@@ -599,6 +853,25 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       {m.label}
                     </option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                  Hyperparameter Search
+                </label>
+                <select
+                  value={config.tuningStrategy}
+                  onChange={(e) =>
+                    onChangeConfig((p) => ({
+                      ...p,
+                      tuningStrategy: e.target.value as TuningStrategy,
+                    }))
+                  }
+                  className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
+                >
+                  <option value="none">Manual Sliders (Fixed Params)</option>
+                  <option value="randomized_search">RandomizedSearchCV (Auto-Tune)</option>
                 </select>
               </div>
 

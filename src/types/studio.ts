@@ -2,19 +2,25 @@ export type TaskType = 'classification' | 'regression';
 export type RuntimeMode = 'pyodide' | 'cloud';
 export type WorkerStatus = 'offline' | 'initializing' | 'idle' | 'busy' | 'error';
 
+export type CellType = 'code' | 'markdown';
+
 export type StepType =
   | 'data_load'
   | 'preprocess'
   | 'split_cv'
   | 'model_train'
   | 'evaluate'
-  | 'custom';
+  | 'submission'
+  | 'custom'
+  | 'markdown_doc';
 
 export type NumericImputerStrategy = 'median' | 'mean' | 'most_frequent' | 'constant_zero';
 export type NumericScalerStrategy = 'standard' | 'robust' | 'minmax' | 'none';
 export type CategoricalImputerStrategy = 'most_frequent' | 'constant_missing';
 export type CategoricalEncoderStrategy = 'onehot' | 'ordinal';
 export type ImbalanceStrategy = 'none' | 'class_weight' | 'random_oversample';
+export type CVStrategy = 'stratified_kfold' | 'kfold' | 'group_kfold' | 'timeseries_split';
+export type TuningStrategy = 'none' | 'randomized_search';
 
 export type ModelFamily =
   | 'HistGradientBoosting'
@@ -37,41 +43,51 @@ export interface HyperparameterConfig {
 }
 
 export interface PipelineConfig {
-  datasetSource: 'sample' | 'upload' | 'cloud_url';
-  sampleDatasetId: string;
+  datasetSource: 'upload' | 'public_url' | 'cloud_path';
   uploadedFileName: string;
-  cloudDatasetUrl: string;
+  testUploadedFileName: string;
+  publicDatasetUrl: string;
+  cloudDatasetPath: string;
+  subsampleRows: number; // 0 = full dataset, >0 = sample n rows for fast iteration
   targetColumn: string;
+  idColumnForSubmission: string;
   taskType: TaskType;
   dropColumns: string[];
   numericColumns: string[];
   categoricalColumns: string[];
 
-  // Bước 2: Tiền xử lý chống Data Leakage (ColumnTransformer)
+  // Bước 2: Tiền xử lý & Feature Engineering trong Pipeline (Chống Data Leakage)
   numericImputer: NumericImputerStrategy;
   numericScaler: NumericScalerStrategy;
   addMissingIndicator: boolean;
+  logTransformNumeric: boolean;
   categoricalImputer: CategoricalImputerStrategy;
   categoricalEncoder: CategoricalEncoderStrategy;
   maxOneHotCategories: number;
 
-  // Bước 3: Chia tập & Cross Validation
+  // Bước 3: Chia tập & Cross Validation (Chống Leakage theo Nhóm / Thời gian)
   testSize: number;
   cvFolds: number;
-  stratifiedCV: boolean;
+  cvStrategy: CVStrategy;
+  groupColumn: string;
   imbalanceStrategy: ImbalanceStrategy;
 
-  // Bước 4: Mô hình & Hyperparameters
+  // Bước 4: Mô hình, Hyperparameters & Tuning
   modelFamily: ModelFamily;
+  tuningStrategy: TuningStrategy;
+  tuningIterations: number;
   hyperparameters: HyperparameterConfig;
 }
 
 export interface ColumnProfile {
   name: string;
   dtype: string;
-  inferred_type: 'numeric' | 'categorical' | 'binary' | 'text_or_id';
+  inferred_type: 'numeric' | 'categorical' | 'binary' | 'id_or_constant' | 'text';
   missing_pct: number;
   nunique: number;
+  is_id_like?: boolean;
+  is_constant?: boolean;
+  target_corr?: number;
   mean?: number;
   std?: number;
   min?: number;
@@ -79,17 +95,27 @@ export interface ColumnProfile {
   top_values?: Record<string, number>;
 }
 
+export interface DataQualityWarning {
+  level: 'info' | 'warning' | 'critical';
+  column?: string;
+  kind: 'id_column' | 'constant_column' | 'high_missing' | 'high_cardinality' | 'duplicate_rows' | 'leakage_risk' | 'large_dataset';
+  message: string;
+}
+
 export interface DataProfile {
   dataset_name: string;
   shape: [number, number];
   memory_mb: number;
+  duplicate_rows?: number;
   columns: ColumnProfile[];
   head: Record<string, unknown>[];
+  warnings?: DataQualityWarning[];
 }
 
 export interface NotebookCell {
   id: string;
   order: number;
+  cellType: CellType;
   stepType: StepType;
   title: string;
   subtitle: string;
@@ -98,6 +124,7 @@ export interface NotebookCell {
   isLocked: boolean;
   status: 'idle' | 'running' | 'success' | 'error' | 'stopped';
   outputText: string;
+  htmlOutput?: string;
   figures: string[];
   durationMs?: number;
 }
@@ -119,18 +146,22 @@ export interface ExperimentMetrics {
   accuracy?: number;
   precision?: number;
   recall?: number;
-  cv_mean?: number;
-  cv_std?: number;
   // Regression
   rmse?: number;
   mae?: number;
   r2?: number;
+  // Cross-validation & Overfit diagnostics
+  train_score?: number;
+  cv_mean?: number;
+  cv_std?: number;
 }
 
 export interface ExperimentRecord {
   id: string;
   runNumber: number;
   timestamp: string;
+  datasetName: string;
+  targetColumn: string;
   modelName: string;
   modelFamily: ModelFamily;
   taskType: TaskType;
@@ -141,6 +172,7 @@ export interface ExperimentRecord {
     numericScaler: string;
     categoricalEncoder: string;
     imbalanceStrategy: string;
+    cvStrategy: string;
     cvFolds: number;
     featureCount: number;
   };
@@ -150,7 +182,7 @@ export interface ExperimentRecord {
   confusionMatrix?: number[][];
   figures: string[];
   durationMs: number;
-  codeSnapshot: { title: string; code: string }[];
+  codeSnapshot: { title: string; cellType: CellType; code: string }[];
   configSnapshot: PipelineConfig;
 }
 
@@ -160,6 +192,7 @@ export interface HardwareInfo {
   ram_used_gb: number;
   ram_total_gb: number;
   python?: string;
+  available_files?: string[];
 }
 
 export interface CliLogEntry {

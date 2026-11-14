@@ -22,6 +22,7 @@ interface RightStudioPaneProps {
   selectedExpId: string | null;
   onSelectExperiment: (id: string) => void;
   onRestoreExperiment: (exp: ExperimentRecord) => void;
+  onInsertMarkdownSummary: (exp: ExperimentRecord) => void;
   onClearExperiments: () => void;
   cliLogs: CliLogEntry[];
   onClearLogs: () => void;
@@ -36,6 +37,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
   selectedExpId,
   onSelectExperiment,
   onRestoreExperiment,
+  onInsertMarkdownSummary,
   onClearExperiments,
   cliLogs,
   onClearLogs,
@@ -45,11 +47,20 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'diagnostics' | 'data'>('leaderboard');
   const [quickCmd, setQuickCmd] = useState<string>('');
   const [cliExpanded, setCliExpanded] = useState<boolean>(true);
+  const [filterCurrentDataset, setFilterCurrentDataset] = useState<boolean>(false);
+
+  const currentDsName = dataProfile?.dataset_name || '';
+
+  const visibleExperiments = filterCurrentDataset && currentDsName
+    ? experiments.filter((e) => e.datasetName === currentDsName)
+    : experiments;
 
   const selectedExp =
-    experiments.find((e) => e.id === selectedExpId) || experiments[0] || null;
+    visibleExperiments.find((e) => e.id === selectedExpId) ||
+    visibleExperiments[0] ||
+    null;
 
-  const sortedExperiments = [...experiments].sort((a, b) => {
+  const sortedExperiments = [...visibleExperiments].sort((a, b) => {
     if (taskType === 'classification') {
       const scoreA = a.metrics.roc_auc ?? a.metrics.f1 ?? 0;
       const scoreB = b.metrics.roc_auc ?? b.metrics.f1 ?? 0;
@@ -61,14 +72,16 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
     }
   });
 
-  const comparisonChartData = [...experiments]
+  const comparisonChartData = [...visibleExperiments]
     .slice()
     .reverse()
     .map((exp) => ({
       name: `#${exp.runNumber} ${exp.modelFamily.slice(0, 7)}`,
-      ROC_AUC: exp.metrics.roc_auc ?? 0,
-      F1: exp.metrics.f1 ?? 0,
-      R2: exp.metrics.r2 ?? 0,
+      Holdout:
+        exp.taskType === 'classification'
+          ? exp.metrics.roc_auc ?? 0
+          : exp.metrics.r2 ?? 0,
+      CV_Mean: exp.metrics.cv_mean ?? 0,
     }));
 
   const handleQuickSubmit = (e: React.FormEvent) => {
@@ -78,9 +91,11 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
     setQuickCmd('');
   };
 
+  const warnings = dataProfile?.warnings || [];
+
   return (
     <aside className="w-full h-full bg-[#202124] border-l border-[#3c4043] flex flex-col overflow-hidden select-none">
-      {/* Minimal Tab Strip */}
+      {/* Tab Strip */}
       <div className="px-3 border-b border-[#3c4043] flex items-center gap-4 text-xs shrink-0">
         <button
           type="button"
@@ -91,7 +106,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
               : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
           }`}
         >
-          Leaderboard ({experiments.length})
+          Leaderboard ({visibleExperiments.length})
         </button>
 
         <button
@@ -109,13 +124,18 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('data')}
-          className={`py-2.5 border-b-2 transition-colors ${
+          className={`py-2.5 border-b-2 transition-colors flex items-center gap-1 ${
             activeTab === 'data'
               ? 'border-[#8ab4f8] text-[#8ab4f8] font-medium'
               : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
           }`}
         >
-          Data Explorer
+          <span>Data & Warnings</span>
+          {warnings.length > 0 && (
+            <span className="px-1 rounded-sm bg-[#3c4043] text-[#fdd663] font-mono text-[10px]">
+              {warnings.length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -124,29 +144,41 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
         {/* ==================== TAB 1: LEADERBOARD ==================== */}
         {activeTab === 'leaderboard' && (
           <div className="space-y-3">
-            {experiments.length === 0 ? (
+            {experiments.length > 0 && (
+              <div className="flex items-center justify-between text-[11px] text-[#9aa0a6]">
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={filterCurrentDataset}
+                    onChange={() => setFilterCurrentDataset((p) => !p)}
+                    className="accent-[#8ab4f8]"
+                  />
+                  <span>Filter by {currentDsName || 'current dataset'}</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={onClearExperiments}
+                  className="hover:text-[#f28b82]"
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
+
+            {visibleExperiments.length === 0 ? (
               <div className="p-5 rounded bg-[#202124] border border-[#3c4043] text-center space-y-1.5">
                 <div className="text-xs font-medium text-[#e8eaed]">
                   No experiment runs recorded
                 </div>
                 <p className="text-[11px] text-[#9aa0a6]">
-                  Click <strong>Run all</strong> in the top toolbar to train the pipeline and log metrics here.
+                  Click <strong>Run all</strong> in the top toolbar to train the pipeline and compare runs.
                 </p>
               </div>
             ) : (
               <>
                 <div className="p-3 rounded bg-[#202124] border border-[#3c4043] space-y-2">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-medium text-[#e8eaed]">
-                      Metric Comparison
-                    </span>
-                    <button
-                      type="button"
-                      onClick={onClearExperiments}
-                      className="text-[#9aa0a6] hover:text-[#f28b82]"
-                    >
-                      Clear history
-                    </button>
+                  <div className="text-[11px] font-medium text-[#e8eaed]">
+                    Holdout vs Cross-Validation Mean
                   </div>
                   <div className="h-36 w-full">
                     <ResponsiveContainer width="100%" height="100%">
@@ -154,7 +186,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                         <CartesianGrid strokeDasharray="3 3" stroke="#292a2d" />
                         <XAxis dataKey="name" tick={{ fill: '#9aa0a6', fontSize: 10 }} />
                         <YAxis
-                          domain={taskType === 'classification' ? [0.5, 1.0] : ['auto', 'auto']}
+                          domain={taskType === 'classification' ? [0.4, 1.0] : ['auto', 'auto']}
                           tick={{ fill: '#9aa0a6', fontSize: 10 }}
                         />
                         <Tooltip
@@ -164,20 +196,14 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                             fontSize: '11px',
                           }}
                         />
-                        {taskType === 'classification' ? (
-                          <>
-                            <Bar dataKey="ROC_AUC" fill="#8ab4f8" />
-                            <Bar dataKey="F1" fill="#81c995" />
-                          </>
-                        ) : (
-                          <Bar dataKey="R2" fill="#8ab4f8" />
-                        )}
+                        <Bar dataKey="Holdout" fill="#8ab4f8" />
+                        <Bar dataKey="CV_Mean" fill="#81c995" />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
 
-                {/* Clean Tabular Leaderboard Cards */}
+                {/* Experiment Cards */}
                 <div className="space-y-2">
                   {sortedExperiments.map((exp, rankIdx) => {
                     const isSelected = selectedExp?.id === exp.id;
@@ -191,7 +217,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                             : 'border-[#3c4043] hover:border-[#5f6368]'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2 mb-1.5 text-xs">
+                        <div className="flex items-center justify-between gap-2 mb-1 text-xs">
                           <div className="flex items-center gap-2 min-w-0">
                             <span className="font-mono text-[11px] text-[#9aa0a6]">
                               #{rankIdx + 1}
@@ -201,49 +227,49 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                             </span>
                           </div>
                           <span className="text-[10px] font-mono text-[#9aa0a6] shrink-0">
-                            {(exp.durationMs / 1000).toFixed(2)}s
+                            {exp.datasetName} • {(exp.durationMs / 1000).toFixed(2)}s
                           </span>
                         </div>
 
                         {exp.taskType === 'classification' ? (
                           <div className="grid grid-cols-4 gap-1.5 my-1.5 text-center font-mono">
                             <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
-                              <div className="text-[9px] text-[#9aa0a6]">AUC</div>
+                              <div className="text-[9px] text-[#9aa0a6]">Holdout AUC</div>
                               <div className="text-xs text-[#8ab4f8]">
                                 {exp.metrics.roc_auc?.toFixed(4)}
                               </div>
                             </div>
                             <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
-                              <div className="text-[9px] text-[#9aa0a6]">F1</div>
-                              <div className="text-xs text-[#e8eaed]">
-                                {exp.metrics.f1?.toFixed(4)}
+                              <div className="text-[9px] text-[#9aa0a6]">CV Mean±Std</div>
+                              <div className="text-[11px] text-[#81c995]">
+                                {exp.metrics.cv_mean?.toFixed(3)}±{exp.metrics.cv_std?.toFixed(2)}
                               </div>
                             </div>
                             <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
-                              <div className="text-[9px] text-[#9aa0a6]">Acc</div>
-                              <div className="text-xs text-[#e8eaed]">
-                                {exp.metrics.accuracy?.toFixed(4)}
-                              </div>
-                            </div>
-                            <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
-                              <div className="text-[9px] text-[#9aa0a6]">CV</div>
+                              <div className="text-[9px] text-[#9aa0a6]">Train AUC</div>
                               <div className="text-xs text-[#9aa0a6]">
-                                {exp.metrics.cv_mean?.toFixed(3)}
+                                {exp.metrics.train_score?.toFixed(3) ?? '-'}
+                              </div>
+                            </div>
+                            <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
+                              <div className="text-[9px] text-[#9aa0a6]">F1 / Acc</div>
+                              <div className="text-[11px] text-[#e8eaed]">
+                                {exp.metrics.f1?.toFixed(2)}/{exp.metrics.accuracy?.toFixed(2)}
                               </div>
                             </div>
                           </div>
                         ) : (
                           <div className="grid grid-cols-3 gap-1.5 my-1.5 text-center font-mono">
                             <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
-                              <div className="text-[9px] text-[#9aa0a6]">RMSE</div>
+                              <div className="text-[9px] text-[#9aa0a6]">Holdout RMSE</div>
                               <div className="text-xs text-[#e8eaed]">
                                 {exp.metrics.rmse?.toFixed(3)}
                               </div>
                             </div>
                             <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
-                              <div className="text-[9px] text-[#9aa0a6]">MAE</div>
-                              <div className="text-xs text-[#e8eaed]">
-                                {exp.metrics.mae?.toFixed(3)}
+                              <div className="text-[9px] text-[#9aa0a6]">CV RMSE</div>
+                              <div className="text-xs text-[#81c995]">
+                                {exp.metrics.cv_mean?.toFixed(3)}
                               </div>
                             </div>
                             <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
@@ -264,6 +290,17 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
+                                onInsertMarkdownSummary(exp);
+                              }}
+                              className="hover:text-[#e8eaed] underline"
+                              title="Insert a Markdown summary cell of this run into the notebook"
+                            >
+                              + MD Note
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
                                 onSelectExperiment(exp.id);
                                 setActiveTab('diagnostics');
                               }}
@@ -279,7 +316,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                               }}
                               className="text-[#8ab4f8] hover:underline"
                             >
-                              Restore config
+                              Restore
                             </button>
                           </div>
                         </div>
@@ -303,12 +340,12 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
               <>
                 <div className="p-2.5 rounded bg-[#202124] border border-[#3c4043] text-xs">
                   <div className="font-medium text-[#e8eaed]">
-                    Run {selectedExp.runNumber}: {selectedExp.modelName}
+                    Run {selectedExp.runNumber}: {selectedExp.modelName} ({selectedExp.datasetName})
                   </div>
                   <div className="text-[11px] font-mono text-[#9aa0a6] mt-0.5">
                     imputer={selectedExp.preprocessingSummary.numericImputer} | scaler=
-                    {selectedExp.preprocessingSummary.numericScaler} | encoder=
-                    {selectedExp.preprocessingSummary.categoricalEncoder}
+                    {selectedExp.preprocessingSummary.numericScaler} | cv=
+                    {selectedExp.preprocessingSummary.cvStrategy}
                   </div>
                 </div>
 
@@ -367,29 +404,64 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
           </div>
         )}
 
-        {/* ==================== TAB 3: DATA EXPLORER ==================== */}
+        {/* ==================== TAB 3: DATA EXPLORER & LEAKAGE WARNINGS ==================== */}
         {activeTab === 'data' && dataProfile && (
           <div className="space-y-3">
-            <div className="grid grid-cols-3 gap-2 font-mono">
+            {/* Summary Metrics */}
+            <div className="grid grid-cols-4 gap-1.5 font-mono">
               <div className="p-2 rounded bg-[#202124] border border-[#3c4043]">
-                <div className="text-[10px] text-[#9aa0a6]">Rows</div>
+                <div className="text-[9px] text-[#9aa0a6]">Rows</div>
                 <div className="text-xs font-bold text-[#e8eaed]">
                   {dataProfile.shape[0].toLocaleString()}
                 </div>
               </div>
               <div className="p-2 rounded bg-[#202124] border border-[#3c4043]">
-                <div className="text-[10px] text-[#9aa0a6]">Columns</div>
+                <div className="text-[9px] text-[#9aa0a6]">Cols</div>
                 <div className="text-xs font-bold text-[#e8eaed]">
                   {dataProfile.shape[1]}
                 </div>
               </div>
               <div className="p-2 rounded bg-[#202124] border border-[#3c4043]">
-                <div className="text-[10px] text-[#9aa0a6]">Memory</div>
+                <div className="text-[9px] text-[#9aa0a6]">Duplicates</div>
                 <div className="text-xs font-bold text-[#e8eaed]">
-                  {dataProfile.memory_mb} MB
+                  {dataProfile.duplicate_rows ?? 0}
+                </div>
+              </div>
+              <div className="p-2 rounded bg-[#202124] border border-[#3c4043]">
+                <div className="text-[9px] text-[#9aa0a6]">RAM</div>
+                <div className="text-xs font-bold text-[#e8eaed]">
+                  {dataProfile.memory_mb}MB
                 </div>
               </div>
             </div>
+
+            {/* Automated Leakage & Data Quality Warnings */}
+            {warnings.length > 0 && (
+              <div className="rounded border border-[#3c4043] bg-[#202124] overflow-hidden">
+                <div className="px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] text-[11px] font-medium text-[#fdd663]">
+                  Automated Data Quality & Leakage Checks ({warnings.length})
+                </div>
+                <div className="p-2.5 space-y-1.5 text-[11px]">
+                  {warnings.map((w, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2 rounded bg-[#18191a] border border-[#292a2d] text-[#e8eaed] leading-snug"
+                    >
+                      <span
+                        className={`font-mono text-[10px] mr-1.5 px-1 py-0.5 rounded-sm ${
+                          w.level === 'warning'
+                            ? 'bg-[#3c4043] text-[#fdd663]'
+                            : 'bg-[#292a2d] text-[#8ab4f8]'
+                        }`}
+                      >
+                        {w.kind}
+                      </span>
+                      {w.message}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="rounded border border-[#3c4043] bg-[#202124] overflow-hidden">
               <div className="px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] text-[11px] font-medium text-[#e8eaed] flex items-center justify-between">
@@ -405,9 +477,17 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                     className="px-3 py-1.5 flex items-center justify-between gap-2 text-[11px] font-mono"
                   >
                     <div className="min-w-0">
-                      <div className="text-[#e8eaed] truncate">{col.name}</div>
+                      <div className="text-[#e8eaed] truncate flex items-center gap-1.5">
+                        <span>{col.name}</span>
+                        {col.is_id_like && (
+                          <span className="text-[9px] px-1 rounded-sm bg-[#3c4043] text-[#fdd663]">
+                            ID (Auto-dropped)
+                          </span>
+                        )}
+                      </div>
                       <div className="text-[10px] text-[#9aa0a6]">
                         {col.dtype} • {col.nunique} unique
+                        {col.mean !== undefined ? ` • mean=${col.mean}` : ''}
                       </div>
                     </div>
                     <span
@@ -533,7 +613,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                 type="text"
                 value={quickCmd}
                 onChange={(e) => setQuickCmd(e.target.value)}
-                placeholder="Evaluate Python expression (e.g. print(df.shape))..."
+                placeholder="Evaluate Python expression (e.g. df.head(3))..."
                 className="flex-1 bg-transparent text-xs font-mono text-[#e8eaed] focus:outline-none placeholder:text-[#5f6368]"
               />
             </form>

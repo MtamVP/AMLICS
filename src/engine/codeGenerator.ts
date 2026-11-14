@@ -1,4 +1,3 @@
-import { SAMPLE_DATASETS } from '../data/sampleDatasets';
 import { NotebookCell, PipelineConfig } from '../types/studio';
 
 function formatPyList(items: string[]): string {
@@ -6,21 +5,66 @@ function formatPyList(items: string[]): string {
   return '[' + items.map((s) => `'${s.replace(/'/g, "\\'")}'`).join(', ') + ']';
 }
 
-export function generateCell1DataLoad(config: PipelineConfig): string {
-  const sample =
-    SAMPLE_DATASETS.find((s) => s.id === config.sampleDatasetId) || SAMPLE_DATASETS[0];
+export function normalizeUrlForPython(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  const ghMatch = trimmed.match(
+    /^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/blob\/(.+)$/i
+  );
+  if (ghMatch) {
+    return `https://raw.githubusercontent.com/${ghMatch[1]}/${ghMatch[2]}/${ghMatch[3]}`;
+  }
+  const gdriveMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/i);
+  if (gdriveMatch && trimmed.includes('drive.google.com')) {
+    return `https://drive.google.com/uc?export=download&id=${gdriveMatch[1]}`;
+  }
+  return trimmed;
+}
 
+export function generateCell1DataLoad(config: PipelineConfig): string {
   let loadBlock = '';
+
   if (config.datasetSource === 'upload' && config.uploadedFileName) {
-    loadBlock = `DATASET_NAME = '${config.uploadedFileName}'
+    const safeFile = config.uploadedFileName.replace(/'/g, "\\'");
+    loadBlock = `DATASET_NAME = '${safeFile}'
 csv_path = f'/tmp/{DATASET_NAME}' if os.path.exists(f'/tmp/{DATASET_NAME}') else DATASET_NAME
 df = pd.read_csv(csv_path)`;
-  } else if (config.datasetSource === 'cloud_url' && config.cloudDatasetUrl.trim()) {
-    loadBlock = `DATASET_NAME = '${config.cloudDatasetUrl.trim().split('/').pop() || 'cloud_dataset.csv'}'
-df = pd.read_csv('${config.cloudDatasetUrl.trim()}')`;
+  } else if (config.datasetSource === 'cloud_path' && config.cloudDatasetPath.trim()) {
+    const cPath = config.cloudDatasetPath.trim().replace(/'/g, "\\'");
+    const baseName = cPath.split('/').pop() || 'cloud_dataset.csv';
+    loadBlock = `DATASET_NAME = '${baseName}'
+df = pd.read_csv('${cPath}')`;
   } else {
-    loadBlock = sample.pythonGeneratorCode;
+    const normUrl = normalizeUrlForPython(
+      config.publicDatasetUrl || '/datasets/titanic.csv'
+    ).replace(/'/g, "\\'");
+    const baseName = normUrl.split('/').pop() || 'dataset.csv';
+    loadBlock = `DATASET_NAME = '${baseName}'
+DATASET_URL = '${normUrl}'
+# Use cached file if pre-fetched in browser Wasm, otherwise read directly from URL
+if os.path.exists('/tmp/_cached_url_dataset.csv'):
+    df = pd.read_csv('/tmp/_cached_url_dataset.csv')
+else:
+    df = pd.read_csv(DATASET_URL)`;
   }
+
+  const testLoadBlock = config.testUploadedFileName
+    ? `
+# Load Kaggle / Competition Test Dataset for submission.csv generation
+TEST_DATASET_NAME = '${config.testUploadedFileName.replace(/'/g, "\\'")}'
+test_csv_path = f'/tmp/{TEST_DATASET_NAME}' if os.path.exists(f'/tmp/{TEST_DATASET_NAME}') else TEST_DATASET_NAME
+if os.path.exists(test_csv_path):
+    df_test = pd.read_csv(test_csv_path)
+    print(f"Test set: {TEST_DATASET_NAME} ({df_test.shape[0]:,} rows, {df_test.shape[1]} cols)")`
+    : '';
+
+  const subsampleBlock =
+    config.subsampleRows > 0
+      ? `
+# Subsample large dataset for fast interactive iteration
+if len(df) > ${config.subsampleRows}:
+    print(f"Subsampling dataset from {len(df):,} -> ${config.subsampleRows.toLocaleString()} rows (random_state=${config.hyperparameters.randomState})")
+    df = df.sample(n=${config.subsampleRows}, random_state=${config.hyperparameters.randomState}).reset_index(drop=True)`
+      : '';
 
   return `# [1] Load Dataset & Sync Schema Profile
 import os
@@ -33,10 +77,10 @@ import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore')
 
-${loadBlock}
+${loadBlock}${testLoadBlock}${subsampleBlock}
 
 print(f"Dataset : {DATASET_NAME} ({df.shape[0]:,} rows, {df.shape[1]} cols)")
-print(f"Target  : '{config.targetColumn}' | Task: ${config.taskType}")
+print(f"Target  : '${config.targetColumn.replace(/'/g, "\\'")}' | Task: ${config.taskType}")
 
 missing_s = (df.isna().sum() / len(df) * 100).round(2)
 missing_cols = missing_s[missing_s > 0]
@@ -79,13 +123,20 @@ export function generateCell2Preprocess(config: PipelineConfig): string {
       ? `OneHotEncoder(handle_unknown='ignore', sparse_output=False, max_categories=${config.maxOneHotCategories})`
       : `OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)`;
 
+  const logStepCode = config.logTransformNumeric
+    ? `\n    ('log_transform', FunctionTransformer(lambda x: np.sign(x) * np.log1p(np.abs(np.nan_to_num(x, nan=0.0))))),`
+    : '';
+
   return `# [2] Anti-Leakage Preprocessing (ColumnTransformer)
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, OneHotEncoder, OrdinalEncoder
+from sklearn.preprocessing import (
+    StandardScaler, RobustScaler, MinMaxScaler,
+    OneHotEncoder, OrdinalEncoder, FunctionTransformer
+)
 
-TARGET_COL = '${config.targetColumn}'
+TARGET_COL = '${config.targetColumn.replace(/'/g, "\\'")}'
 DROP_COLS = ${formatPyList(config.dropColumns)}
 
 requested_num_cols = ${formatPyList(config.numericColumns)}
@@ -94,13 +145,30 @@ requested_cat_cols = ${formatPyList(config.categoricalColumns)}
 numeric_features = [c for c in requested_num_cols if c in df.columns and c != TARGET_COL and c not in DROP_COLS]
 categorical_features = [c for c in requested_cat_cols if c in df.columns and c != TARGET_COL and c not in DROP_COLS]
 
+# Safeguard: Auto-exclude ID/constant columns if feature lists are empty
 if not numeric_features and not categorical_features:
-    feature_candidates = [c for c in df.columns if c != TARGET_COL and c not in DROP_COLS]
-    numeric_features = [c for c in feature_candidates if pd.api.types.is_numeric_dtype(df[c])]
-    categorical_features = [c for c in feature_candidates if not pd.api.types.is_numeric_dtype(df[c]) and df[c].nunique() <= 50]
+    for c in df.columns:
+        if c == TARGET_COL or c in DROP_COLS:
+            continue
+        c_low = str(c).lower()
+        if c_low in ('id', 'index', 'uuid', 'passengerid', 'customerid') or c_low.endswith('_id'):
+            DROP_COLS.append(c)
+            continue
+        if df[c].nunique(dropna=True) <= 1:
+            DROP_COLS.append(c)
+            continue
+        if pd.api.types.is_numeric_dtype(df[c]):
+            if len(df) >= 20 and pd.api.types.is_integer_dtype(df[c]) and (df[c].nunique() / len(df)) >= 0.95:
+                DROP_COLS.append(c)
+            else:
+                numeric_features.append(c)
+        elif df[c].nunique(dropna=True) <= 50:
+            categorical_features.append(c)
+        else:
+            DROP_COLS.append(c)
 
 numeric_transformer = Pipeline(steps=[
-    ('imputer', ${numImputerMap[config.numericImputer]}),
+    ('imputer', ${numImputerMap[config.numericImputer]}),${logStepCode}
     ('scaler', ${numScalerMap[config.numericScaler]})
 ])
 
@@ -128,11 +196,32 @@ if DROP_COLS:
 
 export function generateCell3SplitCV(config: PipelineConfig): string {
   const isClass = config.taskType === 'classification';
-  const stratifyExpr = isClass && config.stratifiedCV ? 'y' : 'None';
-  const cvClass = isClass && config.stratifiedCV ? 'StratifiedKFold' : 'KFold';
+  const isTimeSeries = config.cvStrategy === 'timeseries_split';
+  const isGroup = config.cvStrategy === 'group_kfold';
+  const isStratified = isClass && config.cvStrategy === 'stratified_kfold';
+
+  const stratifyExpr = isStratified && !isTimeSeries ? 'y' : 'None';
+  const shuffleSplit = isTimeSeries ? 'False' : 'True';
+
+  let cvInitCode = '';
+  if (isTimeSeries) {
+    cvInitCode = `from sklearn.model_selection import TimeSeriesSplit
+cv_splitter = TimeSeriesSplit(n_splits=${config.cvFolds})`;
+  } else if (isGroup) {
+    cvInitCode = `from sklearn.model_selection import GroupKFold
+cv_splitter = GroupKFold(n_splits=${config.cvFolds})
+GROUP_COL = '${(config.groupColumn || '').replace(/'/g, "\\'")}'`;
+  } else if (isStratified) {
+    cvInitCode = `from sklearn.model_selection import StratifiedKFold
+cv_splitter = StratifiedKFold(n_splits=${config.cvFolds}, shuffle=True, random_state=${config.hyperparameters.randomState})`;
+  } else {
+    cvInitCode = `from sklearn.model_selection import KFold
+cv_splitter = KFold(n_splits=${config.cvFolds}, shuffle=True, random_state=${config.hyperparameters.randomState})`;
+  }
 
   return `# [3] Train / Holdout Split & Cross-Validation Setup
-from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
+from sklearn.model_selection import train_test_split
+${cvInitCode}
 
 clean_df = df.dropna(subset=[TARGET_COL]).copy()
 X = clean_df[numeric_features + categorical_features].copy()
@@ -141,7 +230,7 @@ y = clean_df[TARGET_COL].copy()
 ${
   isClass
     ? `if not pd.api.types.is_numeric_dtype(y):
-    y = pd.factorize(y)[0]
+    y = pd.Series(pd.factorize(y)[0], index=clean_df.index)
 else:
     y = y.astype(int)`
     : `y = y.astype(float)`
@@ -150,17 +239,12 @@ else:
 X_train, X_test, y_train, y_test = train_test_split(
     X, y,
     test_size=${config.testSize},
+    shuffle=${shuffleSplit},
     random_state=${config.hyperparameters.randomState},
     stratify=${stratifyExpr}
 )
 
-cv_splitter = ${cvClass}(
-    n_splits=${config.cvFolds},
-    shuffle=True,
-    random_state=${config.hyperparameters.randomState}
-)
-
-print(f"Split: Train={X_train.shape[0]:,} | Test={X_test.shape[0]:,} | CV=${cvClass}(n_splits=${config.cvFolds})")
+print(f"Split: Train={X_train.shape[0]:,} | Holdout Test={X_test.shape[0]:,} | CV=${config.cvStrategy}(n_splits=${config.cvFolds})")
 ${
   isClass
     ? `print("Train class distribution:", pd.Series(y_train).value_counts().to_dict())`
@@ -186,6 +270,7 @@ estimator = HistGradientBoostingClassifier(
     min_samples_leaf=${hp.minSamplesLeaf},
     l2_regularization=${hp.l2Regularization},
     class_weight=${useBalancedWeight ? "'balanced'" : 'None'},
+    early_stopping=True,
     random_state=${hp.randomState}
 )
 ACTIVE_MODEL_NAME = "HistGradientBoosting"`
@@ -196,6 +281,7 @@ estimator = HistGradientBoostingRegressor(
     max_depth=${hp.maxDepth},
     min_samples_leaf=${hp.minSamplesLeaf},
     l2_regularization=${hp.l2Regularization},
+    early_stopping=True,
     random_state=${hp.randomState}
 )
 ACTIVE_MODEL_NAME = "HistGradientBoosting"`;
@@ -449,6 +535,41 @@ y_train_fit = train_balanced['__target__']
 print(f"Oversampled train set: {len(X_train)} -> {len(X_train_fit)} rows")`
       : `X_train_fit, y_train_fit = X_train, y_train`;
 
+  const tuningBlock =
+    config.tuningStrategy === 'randomized_search'
+      ? `
+# Automated Hyperparameter Tuning via RandomizedSearchCV
+from sklearn.model_selection import RandomizedSearchCV
+param_dist = {}
+if hasattr(estimator, 'max_depth'):
+    param_dist['model__max_depth'] = [3, 5, 7, 10]
+if hasattr(estimator, 'learning_rate'):
+    param_dist['model__learning_rate'] = [0.02, 0.05, 0.1, 0.15]
+if hasattr(estimator, 'min_samples_leaf'):
+    param_dist['model__min_samples_leaf'] = [5, 15, 30]
+
+if param_dist:
+    print(f"Running RandomizedSearchCV (n_iter=${config.tuningIterations})...")
+    search = RandomizedSearchCV(
+        full_pipeline,
+        param_distributions=param_dist,
+        n_iter=${config.tuningIterations},
+        cv=3,
+        scoring='${isClass ? 'roc_auc' : 'neg_root_mean_squared_error'}',
+        random_state=${hp.randomState}
+    )
+    search.fit(X_train_fit, y_train_fit)
+    full_pipeline = search.best_estimator_
+    print("Best tuned params:", search.best_params_)
+else:
+    full_pipeline.fit(X_train_fit, y_train_fit)`
+      : `full_pipeline.fit(X_train_fit, y_train_fit)`;
+
+  const splitCallExpr =
+    config.cvStrategy === 'group_kfold' && config.groupColumn
+      ? `cv_splitter.split(X_train, y_train, groups=clean_df.loc[X_train.index, GROUP_COL] if GROUP_COL in clean_df.columns else X_train.iloc[:, 0])`
+      : `cv_splitter.split(X_train, y_train)`;
+
   return `# [4] Pipeline Training & Cross-Validation
 from sklearn.base import clone
 from sklearn.metrics import roc_auc_score, f1_score, root_mean_squared_error, r2_score
@@ -462,11 +583,11 @@ full_pipeline = Pipeline(steps=[
 
 ${oversampleBlock}
 
-print(f"Training {ACTIVE_MODEL_NAME} ({${config.cvFolds}}-Fold CV)...")
+print(f"Training {ACTIVE_MODEL_NAME} (${config.cvFolds}-Fold CV)...")
 cv_scores = []
 train_start_t = time.perf_counter()
 
-for fold_idx, (tr_idx, val_idx) in enumerate(cv_splitter.split(X_train, y_train), start=1):
+for fold_idx, (tr_idx, val_idx) in enumerate(${splitCallExpr}, start=1):
     f_t0 = time.perf_counter()
     X_fold_tr, y_fold_tr = X_train.iloc[tr_idx], y_train.iloc[tr_idx]
     X_fold_val, y_fold_val = X_train.iloc[val_idx], y_train.iloc[val_idx]
@@ -476,7 +597,7 @@ for fold_idx, (tr_idx, val_idx) in enumerate(cv_splitter.split(X_train, y_train)
 
 ${
   isClass
-    ? `    if hasattr(fold_pipe, "predict_proba"):
+    ? `    if hasattr(fold_pipe, "predict_proba") and len(np.unique(y_fold_val)) == 2:
         val_probs = fold_pipe.predict_proba(X_fold_val)[:, 1]
         score = roc_auc_score(y_fold_val, val_probs)
         metric_label = "ROC-AUC"
@@ -493,19 +614,46 @@ ${
 
 cv_mean = float(np.mean(cv_scores))
 cv_std = float(np.std(cv_scores))
-print(f"CV {metric_label}: {cv_mean:.4f} +/- {cv_std:.4f}")
+${tuningBlock}
 
-full_pipeline.fit(X_train_fit, y_train_fit)
+# Compute Train Score to check for Overfitting (Train vs CV gap)
+${
+  isClass
+    ? `if hasattr(full_pipeline, "predict_proba") and len(np.unique(y_train)) == 2:
+    train_score = float(roc_auc_score(y_train, full_pipeline.predict_proba(X_train)[:, 1]))
+else:
+    train_score = float(f1_score(y_train, full_pipeline.predict(X_train), average='weighted'))`
+    : `train_score = float(root_mean_squared_error(y_train, full_pipeline.predict(X_train)))`
+}
 total_train_ms = int((time.perf_counter() - train_start_t) * 1000)
-print(f"Fitted full_pipeline in {total_train_ms} ms.")
+print(f"Summary -> Train {metric_label}: {train_score:.4f} | CV {metric_label}: {cv_mean:.4f} +/- {cv_std:.4f} ({total_train_ms} ms)")
 `;
 }
 
 export function generateCell5Evaluate(config: PipelineConfig): string {
   const isClass = config.taskType === 'classification';
+  const idCol = (config.idColumnForSubmission || 'id').replace(/'/g, "\\'");
+
+  const submissionExportBlock = `
+# Export predictions to submission.csv (uses df_test if loaded, otherwise holdout X_test)
+sub_source_df = df_test if 'df_test' in globals() and isinstance(df_test, pd.DataFrame) else clean_df.loc[X_test.index]
+sub_X = sub_source_df[[c for c in (numeric_features + categorical_features) if c in sub_source_df.columns]]
+${
+  isClass
+    ? `sub_preds = full_pipeline.predict_proba(sub_X)[:, 1] if hasattr(full_pipeline, "predict_proba") else full_pipeline.predict(sub_X)`
+    : `sub_preds = full_pipeline.predict(sub_X)`
+}
+id_col_name = '${idCol}' if '${idCol}' in sub_source_df.columns else sub_source_df.columns[0]
+submission_df = pd.DataFrame({
+    id_col_name: sub_source_df[id_col_name].values if id_col_name in sub_source_df.columns else np.arange(len(sub_X)),
+    TARGET_COL: np.round(sub_preds, 6)
+})
+submission_df.to_csv('/tmp/submission.csv', index=False) if os.path.exists('/tmp') else None
+submission_df.to_csv('submission.csv', index=False)
+print(f"Saved submission.csv ({len(submission_df):,} rows, columns: {list(submission_df.columns)})")`;
 
   if (isClass) {
-    return `# [5] Holdout Evaluation & Experiment Logging
+    return `# [5] Holdout Evaluation, Diagnostics & submission.csv Export
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, roc_curve, confusion_matrix
@@ -513,19 +661,24 @@ from sklearn.metrics import (
 from sklearn.inspection import permutation_importance
 
 y_pred = full_pipeline.predict(X_test)
-if hasattr(full_pipeline, "predict_proba"):
+if hasattr(full_pipeline, "predict_proba") and len(np.unique(y_test)) == 2:
     y_prob = full_pipeline.predict_proba(X_test)[:, 1]
+    auc_val = float(roc_auc_score(y_test, y_prob))
 else:
     y_prob = y_pred.astype(float)
+    auc_val = float(f1_score(y_test, y_pred, average='weighted'))
 
 acc = float(accuracy_score(y_test, y_pred))
-prec = float(precision_score(y_test, y_pred, zero_division=0))
-rec = float(recall_score(y_test, y_pred, zero_division=0))
-f1 = float(f1_score(y_test, y_pred, zero_division=0))
-auc_val = float(roc_auc_score(y_test, y_prob))
+prec = float(precision_score(y_test, y_pred, average='binary' if len(np.unique(y_test)) == 2 else 'weighted', zero_division=0))
+rec = float(recall_score(y_test, y_pred, average='binary' if len(np.unique(y_test)) == 2 else 'weighted', zero_division=0))
+f1 = float(f1_score(y_test, y_pred, average='binary' if len(np.unique(y_test)) == 2 else 'weighted', zero_division=0))
 cm = confusion_matrix(y_test, y_pred).tolist()
 
-fpr_arr, tpr_arr, _ = roc_curve(y_test, y_prob)
+if len(np.unique(y_test)) == 2:
+    fpr_arr, tpr_arr, _ = roc_curve(y_test, y_prob)
+else:
+    fpr_arr, tpr_arr = np.array([0.0, 1.0]), np.array([0.0, 1.0])
+
 step_stride = max(1, len(fpr_arr) // 35)
 roc_points = [
     {"fpr": round(float(fpr_arr[i]), 4), "tpr": round(float(tpr_arr[i]), 4)}
@@ -534,8 +687,11 @@ roc_points = [
 if roc_points[-1]["fpr"] < 1.0:
     roc_points.append({"fpr": 1.0, "tpr": 1.0})
 
+# Subsample X_test if > 2000 rows so permutation_importance stays fast
+X_perm = X_test.iloc[:2000] if len(X_test) > 2000 else X_test
+y_perm = y_test.iloc[:2000] if len(y_test) > 2000 else y_test
 perm_res = permutation_importance(
-    full_pipeline, X_test, y_test, n_repeats=5, random_state=42, scoring='roc_auc'
+    full_pipeline, X_perm, y_perm, n_repeats=4, random_state=42
 )
 raw_feat_names = numeric_features + categorical_features
 fi_pairs = sorted(
@@ -549,9 +705,10 @@ feature_importance_list = [
 ]
 
 print(f"Holdout Results ({ACTIVE_MODEL_NAME}):")
-print(f"  ROC-AUC   : {auc_val:.4f} (CV: {cv_mean:.4f} +/- {cv_std:.4f})")
+print(f"  ROC-AUC   : {auc_val:.4f} | Train: {train_score:.4f} | CV: {cv_mean:.4f} +/- {cv_std:.4f}")
 print(f"  F1-Score  : {f1:.4f} | Accuracy : {acc:.4f}")
 print(f"  Precision : {prec:.4f} | Recall   : {rec:.4f}")
+${submissionExportBlock}
 
 plt.style.use('dark_background')
 fig, axes = plt.subplots(1, 3, figsize=(13.5, 3.8), dpi=115)
@@ -572,11 +729,9 @@ axes[1].imshow(cm_np, cmap='Blues')
 axes[1].set_title('Confusion Matrix', fontsize=10, color='#e8eaed')
 axes[1].set_xlabel('Predicted', fontsize=9)
 axes[1].set_ylabel('Actual', fontsize=9)
-axes[1].set_xticks([0, 1])
-axes[1].set_yticks([0, 1])
 for i in range(cm_np.shape[0]):
     for j in range(cm_np.shape[1]):
-        axes[1].text(j, i, f"{cm_np[i, j]}", ha="center", va="center", color="white", fontsize=11)
+        axes[1].text(j, i, f"{cm_np[i, j]}", ha="center", va="center", color="white", fontsize=10)
 
 axes[2].set_facecolor('#18191a')
 top_names = [x['feature'] for x in reversed(feature_importance_list[:8])]
@@ -588,6 +743,8 @@ axes[2].grid(axis='x', alpha=0.12)
 plt.tight_layout()
 
 _automl_experiment_result = {
+    "dataset_name": DATASET_NAME,
+    "target_column": TARGET_COL,
     "model_name": ACTIVE_MODEL_NAME,
     "task_type": "classification",
     "metrics": {
@@ -596,6 +753,7 @@ _automl_experiment_result = {
         "accuracy": round(acc, 4),
         "precision": round(prec, 4),
         "recall": round(rec, 4),
+        "train_score": round(train_score, 4),
         "cv_mean": round(cv_mean, 4),
         "cv_std": round(cv_std, 4)
     },
@@ -606,7 +764,7 @@ _automl_experiment_result = {
 `;
   }
 
-  return `# [5] Holdout Regression Evaluation & Experiment Logging
+  return `# [5] Holdout Regression Evaluation & submission.csv Export
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
 from sklearn.inspection import permutation_importance
 
@@ -615,8 +773,10 @@ rmse_val = float(root_mean_squared_error(y_test, y_pred))
 mae_val = float(mean_absolute_error(y_test, y_pred))
 r2_val = float(r2_score(y_test, y_pred))
 
+X_perm = X_test.iloc[:2000] if len(X_test) > 2000 else X_test
+y_perm = y_test.iloc[:2000] if len(y_test) > 2000 else y_test
 perm_res = permutation_importance(
-    full_pipeline, X_test, y_test, n_repeats=5, random_state=42, scoring='r2'
+    full_pipeline, X_perm, y_perm, n_repeats=4, random_state=42, scoring='r2'
 )
 raw_feat_names = numeric_features + categorical_features
 fi_pairs = sorted(
@@ -630,8 +790,9 @@ feature_importance_list = [
 ]
 
 print(f"Holdout Results ({ACTIVE_MODEL_NAME}):")
-print(f"  RMSE : {rmse_val:.4f} (CV: {cv_mean:.4f})")
-print(f"  MAE  : {mae_val:.4f} | R2 : {r2_val:.4f}")
+print(f"  RMSE : {rmse_val:.4f} | Train RMSE: {train_score:.4f} | CV: {cv_mean:.4f}")
+print(f"  MAE  : {mae_val:.4f} | R2        : {r2_val:.4f}")
+${submissionExportBlock}
 
 plt.style.use('dark_background')
 fig, axes = plt.subplots(1, 2, figsize=(10.5, 3.8), dpi=115)
@@ -654,12 +815,15 @@ axes[1].grid(axis='x', alpha=0.12)
 plt.tight_layout()
 
 _automl_experiment_result = {
+    "dataset_name": DATASET_NAME,
+    "target_column": TARGET_COL,
     "model_name": ACTIVE_MODEL_NAME,
     "task_type": "regression",
     "metrics": {
         "rmse": round(rmse_val, 4),
         "mae": round(mae_val, 4),
         "r2": round(r2_val, 4),
+        "train_score": round(train_score, 4),
         "cv_mean": round(cv_mean, 4),
         "cv_std": round(cv_std, 4)
     },
@@ -685,7 +849,7 @@ export function buildAllPipelineCells(
       order: 1,
       stepType: 'data_load',
       title: '1. Load Dataset & Profile',
-      subtitle: 'Read DataFrame and sync schema metadata',
+      subtitle: 'Read CSV and sync schema metadata',
       code: generateCell1DataLoad(config),
     },
     {
@@ -701,7 +865,7 @@ export function buildAllPipelineCells(
       order: 3,
       stepType: 'split_cv',
       title: '3. Train / Holdout Split & CV',
-      subtitle: 'Partition dataset and configure K-Fold cross-validation',
+      subtitle: 'Partition dataset and configure cross-validation',
       code: generateCell3SplitCV(config),
     },
     {
@@ -716,8 +880,8 @@ export function buildAllPipelineCells(
       id: 'cell_05_eval',
       order: 5,
       stepType: 'evaluate',
-      title: '5. Evaluate & Log Experiment',
-      subtitle: 'Compute holdout metrics, plots, and record to leaderboard',
+      title: '5. Evaluate & Export submission.csv',
+      subtitle: 'Compute holdout metrics, plots, and save submission.csv',
       code: generateCell5Evaluate(config),
     },
   ];
@@ -726,6 +890,7 @@ export function buildAllPipelineCells(
     return templates.map((t) => ({
       id: t.id,
       order: t.order,
+      cellType: 'code',
       stepType: t.stepType,
       title: t.title,
       subtitle: t.subtitle,
@@ -738,33 +903,23 @@ export function buildAllPipelineCells(
     }));
   }
 
-  const updatedStandardCells = templates.map((t) => {
-    const prev = existingCells.find((c) => c.id === t.id || c.stepType === t.stepType);
-    if (!prev) {
-      return {
-        id: t.id,
-        order: t.order,
-        stepType: t.stepType,
-        title: t.title,
-        subtitle: t.subtitle,
-        generatedCode: t.code,
-        currentCode: t.code,
-        isLocked: false,
-        status: 'idle' as const,
-        outputText: '',
-        figures: [],
-      };
-    }
+  // Update the 5 standard pipeline cells in-place while preserving user cell order, Markdown cells, and custom cells
+  const templateByStep = new Map(templates.map((t) => [t.stepType, t]));
 
+  const updated = existingCells.map((cell) => {
+    if (cell.cellType === 'markdown' || cell.stepType === 'custom' || cell.stepType === 'markdown_doc') {
+      return cell;
+    }
+    const tpl = templateByStep.get(cell.stepType);
+    if (!tpl) return cell;
     return {
-      ...prev,
-      title: t.title,
-      subtitle: t.subtitle,
-      generatedCode: t.code,
-      currentCode: prev.isLocked ? prev.currentCode : t.code,
+      ...cell,
+      title: tpl.title,
+      subtitle: tpl.subtitle,
+      generatedCode: tpl.code,
+      currentCode: cell.isLocked ? cell.currentCode : tpl.code,
     };
   });
 
-  const customCells = existingCells.filter((c) => c.stepType === 'custom');
-  return [...updatedStandardCells, ...customCells];
+  return updated;
 }
