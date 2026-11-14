@@ -66,6 +66,7 @@ import {
 import {
   loadCsvFileFromCache,
   loadWorkspaceStateFromCache,
+  removeCsvFileFromCache,
   saveCsvFileToCache,
   saveWorkspaceStateToCache,
 } from './utils/datasetCacheDb';
@@ -1662,8 +1663,23 @@ ${metricLines}`;
   const processTrainCsvFile = async (file: File) => {
     const textContent = await file.text();
     const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const subRows =
+      runtimeMode === 'pyodide' && file.size > 15 * 1024 * 1024 ? 10000 : 0;
 
-    await saveCsvFileToCache('train', safeFilename, textContent);
+    configProvenanceRef.current = 'ai_copilot';
+    const nextCfgSnapshot: PipelineConfig = {
+      ...configRef.current,
+      datasetSource: 'upload',
+      uploadedFileName: safeFilename,
+      subsampleRows: subRows,
+    };
+    setConfig((prev) => ({
+      ...prev,
+      datasetSource: 'upload',
+      uploadedFileName: safeFilename,
+      subsampleRows: subRows,
+    }));
+    ensureCellsInitializedForDataset(nextCfgSnapshot);
 
     pyodideWorkerRef.current?.postMessage({
       type: 'write_csv',
@@ -1674,14 +1690,23 @@ ${metricLines}`;
       },
     });
 
-    let publicUrl: string | null = null;
-    if (cloudBrokerRef.current?.isConfigured()) {
-      publicUrl = await cloudBrokerRef.current.uploadCsvToStorage(file);
-    }
+    void saveCsvFileToCache('train', safeFilename, textContent);
+
     if (cloudBrokerRef.current && cloudConnected && cloudWorkerStatus !== 'offline' && textContent.length <= 4 * 1024 * 1024) {
       const key = `${sessionId}:train:${safeFilename}:${textContent.length}`;
       cloudSyncedKeysRef.current.add(key);
       void cloudBrokerRef.current.sendUploadCsv(safeFilename, textContent, false, false);
+    }
+
+    if (cloudBrokerRef.current?.isConfigured()) {
+      void cloudBrokerRef.current.uploadCsvToStorage(file).then((publicUrl) => {
+        if (publicUrl) {
+          setConfig((prev) => ({
+            ...prev,
+            cloudDatasetPath: publicUrl,
+          }));
+        }
+      });
     }
 
     if (textContent.length <= 15 * 1024 * 1024) {
@@ -1693,36 +1718,22 @@ ${metricLines}`;
         safeFilename,
         textContent
       ).then((syncUrl) => {
-        const finalUrl = syncUrl || publicUrl;
-        if (finalUrl) {
+        if (syncUrl) {
           setWorkspaces((prev) =>
             prev.map((w) =>
-              w.id === activeWorkspaceId ? { ...w, trainDatasetUrl: finalUrl } : w
+              w.id === activeWorkspaceId ? { ...w, trainDatasetUrl: syncUrl } : w
             )
           );
           const ws = workspacesRef.current.find((w) => w.id === activeWorkspaceId);
           if (ws) {
             void pushNotebookToSupabase(supabaseCreds, syncKey, {
               ...ws,
-              trainDatasetUrl: finalUrl,
+              trainDatasetUrl: syncUrl,
             });
           }
         }
       });
     }
-
-    configProvenanceRef.current = 'ai_copilot';
-    const nextCfg: PipelineConfig = {
-      ...configRef.current,
-      datasetSource: 'upload',
-      uploadedFileName: safeFilename,
-      cloudDatasetPath: publicUrl || configRef.current.cloudDatasetPath,
-      // Auto-enable 10k row subsampling if file > 15MB in browser Wasm
-      subsampleRows:
-        runtimeMode === 'pyodide' && file.size > 15 * 1024 * 1024 ? 10000 : 0,
-    };
-    setConfig(nextCfg);
-    ensureCellsInitializedForDataset(nextCfg);
   };
 
   // Upload Train CSV
@@ -1742,7 +1753,11 @@ ${metricLines}`;
     const textContent = await file.text();
     const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
 
-    await saveCsvFileToCache('test', safeFilename, textContent);
+    configProvenanceRef.current = 'ai_copilot';
+    setConfig((prev) => ({
+      ...prev,
+      testUploadedFileName: safeFilename,
+    }));
 
     pyodideWorkerRef.current?.postMessage({
       type: 'write_csv',
@@ -1752,6 +1767,8 @@ ${metricLines}`;
         isTestFile: true,
       },
     });
+
+    void saveCsvFileToCache('test', safeFilename, textContent);
 
     if (cloudBrokerRef.current && cloudConnected && cloudWorkerStatus !== 'offline' && textContent.length <= 4 * 1024 * 1024) {
       const key = `${sessionId}:test:${safeFilename}:${textContent.length}`;
@@ -1784,13 +1801,37 @@ ${metricLines}`;
         }
       });
     }
+  };
 
-    configProvenanceRef.current = 'ai_copilot';
+  const handleClearTrainCsv = useCallback(() => {
+    void removeCsvFileFromCache('train');
+    lastProfileDatasetRef.current = '';
+    setDataProfile(null);
     setConfig((prev) => ({
       ...prev,
-      testUploadedFileName: safeFilename,
+      uploadedFileName: '',
     }));
-  };
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === activeWorkspaceId ? { ...w, trainDatasetUrl: null } : w
+      )
+    );
+    appendCliLog('system', '[Train Dataset] Đã gỡ file train khỏi notebook hiện tại.');
+  }, [activeWorkspaceId, appendCliLog]);
+
+  const handleClearTestCsv = useCallback(() => {
+    void removeCsvFileFromCache('test');
+    setConfig((prev) => ({
+      ...prev,
+      testUploadedFileName: '',
+    }));
+    setWorkspaces((prev) =>
+      prev.map((w) =>
+        w.id === activeWorkspaceId ? { ...w, testDatasetUrl: null } : w
+      )
+    );
+    appendCliLog('system', '[Test Dataset] Đã gỡ file test khỏi notebook hiện tại.');
+  }, [activeWorkspaceId, appendCliLog]);
 
   // Upload Demo / Sample Submission CSV (Kaggle sample_submission.csv)
   const handleSampleSubCsvChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2898,6 +2939,8 @@ ${metricLines}`;
               onUploadCsvClick={() => trainCsvInputRef.current?.click()}
               onUploadTestCsvClick={() => testCsvInputRef.current?.click()}
               onUploadSampleSubCsvClick={() => sampleSubInputRef.current?.click()}
+              onClearTrainCsv={handleClearTrainCsv}
+              onClearTestCsv={handleClearTestCsv}
               onFetchPublicUrl={handleFetchPublicUrl}
               onUseCloudDatasetPath={handleUseCloudDatasetPath}
               onSwitchToCloud={() => {

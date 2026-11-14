@@ -30,6 +30,8 @@ interface LeftPipelineSidebarProps {
   onUploadCsvClick: () => void;
   onUploadTestCsvClick: () => void;
   onUploadSampleSubCsvClick: () => void;
+  onClearTrainCsv?: () => void;
+  onClearTestCsv?: () => void;
   onFetchPublicUrl: (url: string, presetId?: string) => void;
   onUseCloudDatasetPath?: (cloudPath: string) => void;
   onSwitchToCloud: () => void;
@@ -62,6 +64,8 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   onUploadCsvClick,
   onUploadTestCsvClick,
   onUploadSampleSubCsvClick,
+  onClearTrainCsv,
+  onClearTestCsv,
   onFetchPublicUrl,
   onUseCloudDatasetPath,
   onSwitchToCloud,
@@ -289,38 +293,90 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
               {/* Tab A: Upload Local CSV (train.csv + optional test.csv) */}
               {config.datasetSource === 'upload' && (
                 <div className="space-y-2">
-                  <div className="p-2 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-[10px] text-[#9aa0a6]">Train Dataset</div>
-                      <div className="text-xs font-mono text-[#e8eaed] truncate">
-                        {config.uploadedFileName || 'No file uploaded'}
+                  <div className="p-2 rounded bg-[#202124] border border-[#3c4043] space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[10px] text-[#9aa0a6]">Train Dataset</div>
+                        <div className="text-xs font-mono text-[#e8eaed] truncate">
+                          {config.uploadedFileName || (dataProfile ? dataProfile.dataset_name : 'No file uploaded')}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {(config.uploadedFileName || dataProfile) && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onClearTrainCsv
+                                ? onClearTrainCsv()
+                                : onChangeConfig((p) => ({ ...p, uploadedFileName: '' }))
+                            }
+                            title="Gỡ bỏ train.csv"
+                            className="px-1.5 py-1 rounded bg-[#292a2d] hover:bg-[#f28b82]/20 text-[#9aa0a6] hover:text-[#f28b82] text-[11px]"
+                          >
+                            ×
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={onUploadCsvClick}
+                          className="px-2 py-1 rounded bg-[#303134] hover:bg-[#3c4043] text-[#e8eaed] text-[11px] shrink-0"
+                        >
+                          Select train.csv
+                        </button>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={onUploadCsvClick}
-                      className="px-2 py-1 rounded bg-[#303134] hover:bg-[#3c4043] text-[#e8eaed] text-[11px] shrink-0"
-                    >
-                      Select train.csv
-                    </button>
+                    {(config.uploadedFileName || dataProfile) && (
+                      <div className="text-[10px] font-mono text-[#81c995] bg-[#81c995]/10 border border-[#81c995]/25 rounded px-2 py-1 leading-snug">
+                        {dataProfile
+                          ? `Đã tải lên • ${dataProfile.shape[0].toLocaleString()} dòng × ${dataProfile.shape[1]} cột • Target: ${config.targetColumn}`
+                          : `Đã tải file ${config.uploadedFileName} • Đang đọc cấu trúc cột...`}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="p-2 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-[10px] text-[#9aa0a6]">
-                        Test Dataset (Optional — for submission.csv)
+                  <div className="p-2 rounded bg-[#202124] border border-[#3c4043] space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[10px] text-[#9aa0a6]">
+                          Test Dataset (Optional — for submission.csv)
+                        </div>
+                        <div
+                          className={`text-xs font-mono truncate ${
+                            config.testUploadedFileName ? 'text-[#e8eaed]' : 'text-[#9aa0a6]'
+                          }`}
+                        >
+                          {config.testUploadedFileName || 'None (uses holdout split)'}
+                        </div>
                       </div>
-                      <div className="text-xs font-mono text-[#9aa0a6] truncate">
-                        {config.testUploadedFileName || 'None (uses holdout split)'}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {config.testUploadedFileName && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onClearTestCsv
+                                ? onClearTestCsv()
+                                : onChangeConfig((p) => ({ ...p, testUploadedFileName: '' }))
+                            }
+                            title="Gỡ bỏ test.csv"
+                            className="px-1.5 py-1 rounded bg-[#292a2d] hover:bg-[#f28b82]/20 text-[#9aa0a6] hover:text-[#f28b82] text-[11px]"
+                          >
+                            ×
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={onUploadTestCsvClick}
+                          className="px-2 py-1 rounded bg-[#292a2d] hover:bg-[#3c4043] text-[#9aa0a6] hover:text-[#e8eaed] text-[11px] shrink-0"
+                        >
+                          Select test.csv
+                        </button>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={onUploadTestCsvClick}
-                      className="px-2 py-1 rounded bg-[#292a2d] hover:bg-[#3c4043] text-[#9aa0a6] hover:text-[#e8eaed] text-[11px] shrink-0"
-                    >
-                      Select test.csv
-                    </button>
+                    {config.testUploadedFileName && (
+                      <div className="text-[10px] font-mono text-[#81c995] bg-[#81c995]/10 border border-[#81c995]/25 rounded px-2 py-1 leading-snug">
+                        Đã tải lên • Sẵn sàng dự đoán xuất submission.csv
+                      </div>
+                    )}
                   </div>
 
                   <div className="p-2 rounded bg-[#202124] border border-[#3c4043] space-y-1.5">
