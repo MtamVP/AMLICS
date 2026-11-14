@@ -62,11 +62,14 @@ import {
 const EXP_STORAGE_KEY = 'amlics_experiments_v2';
 const CONFIG_STORAGE_KEY = 'amlics_pipeline_config_v2';
 const WORKSPACES_STORAGE_KEY = 'amlics_workspaces_v1';
+const ACTIVE_WS_STORAGE_KEY = 'amlics_active_workspace_v1';
 
 interface StoredWorkspaceSnapshot extends NotebookWorkspaceMeta {
   config: PipelineConfig;
   cells: NotebookCell[];
   dataProfile: DataProfile | null;
+  experiments?: ExperimentRecord[];
+  selectedExpId?: string | null;
 }
 
 function triggerBrowserDownload(filename: string, textContent: string) {
@@ -215,19 +218,38 @@ export function App() {
       },
     ];
   });
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(
-    () => workspaces[0]?.id || 'ws_default'
-  );
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(() => {
+    try {
+      const savedId = localStorage.getItem(ACTIVE_WS_STORAGE_KEY);
+      if (savedId && workspaces.some((w) => w.id === savedId)) return savedId;
+    } catch {
+      // ignore
+    }
+    return workspaces[0]?.id || 'ws_default';
+  });
 
   const [experiments, setExperiments] = useState<ExperimentRecord[]>(() => {
     try {
+      const savedId = localStorage.getItem(ACTIVE_WS_STORAGE_KEY);
+      const activeWs = workspaces.find((w) => w.id === savedId) || workspaces[0];
+      if (activeWs && Array.isArray(activeWs.experiments)) {
+        return activeWs.experiments;
+      }
       const saved = localStorage.getItem(EXP_STORAGE_KEY);
       return saved ? JSON.parse(saved) : [];
     } catch {
       return [];
     }
   });
-  const [selectedExpId, setSelectedExpId] = useState<string | null>(null);
+  const [selectedExpId, setSelectedExpId] = useState<string | null>(() => {
+    try {
+      const savedId = localStorage.getItem(ACTIVE_WS_STORAGE_KEY);
+      const activeWs = workspaces.find((w) => w.id === savedId) || workspaces[0];
+      return activeWs?.selectedExpId ?? null;
+    } catch {
+      return null;
+    }
+  });
   const [cliLogs, setCliLogs] = useState<CliLogEntry[]>([]);
   const [namespaceVars, setNamespaceVars] = useState<string[]>([
     'pd',
@@ -303,6 +325,21 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const activeWs = workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0];
+      if (activeWs) {
+        setProjectName(activeWs.name);
+        if (activeWs.config) {
+          setConfig(activeWs.config);
+        }
+        if (activeWs.dataProfile) {
+          lastProfileDatasetRef.current = activeWs.dataProfile.dataset_name;
+          setDataProfile(activeWs.dataProfile);
+        }
+        if (activeWs.cells && activeWs.cells.length > 0) {
+          setCells(activeWs.cells);
+        }
+      }
+
       const [{ dataProfile: savedProfile, cells: savedCells }, cachedTrain, cachedTest] =
         await Promise.all([
           loadWorkspaceStateFromCache(),
@@ -312,16 +349,25 @@ export function App() {
 
       if (cancelled) return;
 
-      if (savedProfile) {
-        lastProfileDatasetRef.current = savedProfile.dataset_name;
-        setDataProfile(savedProfile);
-      }
-      if (savedCells && savedCells.length > 0) {
-        setCells(savedCells);
+      const wsHasOwnState = Boolean(activeWs && (activeWs.cells.length > 0 || activeWs.dataProfile));
+      if (!wsHasOwnState) {
+        if (savedProfile) {
+          lastProfileDatasetRef.current = savedProfile.dataset_name;
+          setDataProfile(savedProfile);
+        }
+        if (savedCells && savedCells.length > 0) {
+          setCells(savedCells);
+        }
       }
       workspaceHydratedRef.current = true;
 
-      if (cachedTrain && pyodideWorkerRef.current) {
+      const expectedTrainName = activeWs?.config?.uploadedFileName || '';
+      const shouldRestoreCachedTrain =
+        cachedTrain &&
+        pyodideWorkerRef.current &&
+        (!wsHasOwnState || expectedTrainName === cachedTrain.filename);
+
+      if (shouldRestoreCachedTrain && cachedTrain && pyodideWorkerRef.current) {
         pyodideWorkerRef.current.postMessage({
           type: 'write_csv',
           payload: {
@@ -333,7 +379,7 @@ export function App() {
           },
         });
         configProvenanceRef.current = 'ai_copilot';
-    setConfig((prev) => ({
+        setConfig((prev) => ({
           ...prev,
           uploadedFileName: prev.uploadedFileName || cachedTrain.filename,
         }));
@@ -345,7 +391,12 @@ export function App() {
         handleFetchPublicUrl(configRef.current.publicDatasetUrl);
       }
 
-      if (cachedTest && pyodideWorkerRef.current) {
+      const expectedTestName = activeWs?.config?.testUploadedFileName || '';
+      if (
+        cachedTest &&
+        pyodideWorkerRef.current &&
+        (!wsHasOwnState || expectedTestName === cachedTest.filename)
+      ) {
         pyodideWorkerRef.current.postMessage({
           type: 'write_csv',
           payload: {
@@ -356,7 +407,7 @@ export function App() {
           },
         });
         configProvenanceRef.current = 'ai_copilot';
-    setConfig((prev) => ({
+        setConfig((prev) => ({
           ...prev,
           testUploadedFileName: prev.testUploadedFileName || cachedTest.filename,
         }));
@@ -1744,6 +1795,11 @@ ${metricLines}`;
   // ==================== SMART AUTO-OPTIMIZE, AI BYOK, WHAT-IF & MULTI-NOTEBOOK ====================
   useEffect(() => {
     if (!workspaceHydratedRef.current) return;
+    try {
+      localStorage.setItem(ACTIVE_WS_STORAGE_KEY, activeWorkspaceId);
+    } catch {
+      // ignore
+    }
     setWorkspaces((prev) => {
       const lightweightCells = cells.map((c) => ({ ...c, figures: [] }));
       const next = prev.map((w) =>
@@ -1755,6 +1811,8 @@ ${metricLines}`;
               config,
               cells: lightweightCells,
               dataProfile,
+              experiments,
+              selectedExpId,
             }
           : w
       );
@@ -1765,29 +1823,51 @@ ${metricLines}`;
       }
       return next;
     });
-  }, [activeWorkspaceId, projectName, config, cells, dataProfile]);
+  }, [activeWorkspaceId, projectName, config, cells, dataProfile, experiments, selectedExpId]);
+
+  const resetRuntimeForWorkspaceSwitch = useCallback(() => {
+    setHasSubmissionCsv(false);
+    setWhatIfResult(null);
+    setBatchPredictMessage(null);
+    setNamespaceVars(['pd', 'np', 'plt']);
+    if (runtimeModeRef.current === 'pyodide') {
+      pyodideWorkerRef.current?.postMessage({ type: 'restart' });
+    }
+  }, []);
 
   const handleSelectWorkspace = (targetId: string) => {
     if (targetId === activeWorkspaceId) return;
     const target = workspaces.find((w) => w.id === targetId);
     if (!target) return;
+    try {
+      localStorage.setItem(ACTIVE_WS_STORAGE_KEY, target.id);
+    } catch {
+      // ignore
+    }
+    const nextCells =
+      target.cells && target.cells.length > 0
+        ? target.cells
+        : buildAllPipelineCells(target.config, []);
     setActiveWorkspaceId(target.id);
     setProjectName(target.name);
     setConfig(target.config);
     lastProfileDatasetRef.current = target.dataProfile?.dataset_name || '';
     setDataProfile(target.dataProfile);
-    setCells(
-      target.cells && target.cells.length > 0
-        ? target.cells
-        : buildAllPipelineCells(target.config, [])
-    );
-    setWhatIfResult(null);
-    appendCliLog('system', `Switched to notebook: ${target.name}.ipynb`);
+    setCells(nextCells);
+    setActiveCellId(nextCells[0]?.id || null);
+    setExperiments(target.experiments || []);
+    setSelectedExpId(target.selectedExpId ?? null);
+    resetRuntimeForWorkspaceSwitch();
+    appendCliLog('system', `Đã chuyển sang notebook độc lập: ${target.name}.ipynb`);
   };
 
   const handleCreateWorkspace = () => {
     const newId = `ws_${Date.now()}`;
-    const newName = `AMLICS_Notebook_${workspaces.length + 1}`;
+    let idx = workspaces.length + 1;
+    while (workspaces.some((w) => w.name === `AMLICS_Notebook_${idx}`)) {
+      idx += 1;
+    }
+    const newName = `AMLICS_Notebook_${idx}`;
     const defaultCfg = createDefaultPipelineConfig();
     const initialCells = buildAllPipelineCells(defaultCfg, []);
     const newWs: StoredWorkspaceSnapshot = {
@@ -1797,11 +1877,14 @@ ${metricLines}`;
       config: defaultCfg,
       cells: initialCells,
       dataProfile: null,
+      experiments: [],
+      selectedExpId: null,
     };
     const nextList = [...workspaces, newWs];
     setWorkspaces(nextList);
     try {
       localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(nextList));
+      localStorage.setItem(ACTIVE_WS_STORAGE_KEY, newId);
     } catch {
       // ignore
     }
@@ -1811,8 +1894,11 @@ ${metricLines}`;
     lastProfileDatasetRef.current = '';
     setDataProfile(null);
     setCells(initialCells);
-    setWhatIfResult(null);
-    appendCliLog('system', `Created new notebook: ${newName}.ipynb`);
+    setActiveCellId(initialCells[0]?.id || null);
+    setExperiments([]);
+    setSelectedExpId(null);
+    resetRuntimeForWorkspaceSwitch();
+    appendCliLog('system', `Đã tạo notebook mới hoàn toàn độc lập: ${newName}.ipynb`);
   };
 
   const handleDeleteWorkspace = (targetId: string) => {
@@ -1826,17 +1912,25 @@ ${metricLines}`;
     }
     if (activeWorkspaceId === targetId && filtered[0]) {
       const nextWs = filtered[0];
+      try {
+        localStorage.setItem(ACTIVE_WS_STORAGE_KEY, nextWs.id);
+      } catch {
+        // ignore
+      }
+      const nextCells =
+        nextWs.cells && nextWs.cells.length > 0
+          ? nextWs.cells
+          : buildAllPipelineCells(nextWs.config, []);
       setActiveWorkspaceId(nextWs.id);
       setProjectName(nextWs.name);
       setConfig(nextWs.config);
       lastProfileDatasetRef.current = nextWs.dataProfile?.dataset_name || '';
       setDataProfile(nextWs.dataProfile);
-      setCells(
-        nextWs.cells && nextWs.cells.length > 0
-          ? nextWs.cells
-          : buildAllPipelineCells(nextWs.config, [])
-      );
-      setWhatIfResult(null);
+      setCells(nextCells);
+      setActiveCellId(nextCells[0]?.id || null);
+      setExperiments(nextWs.experiments || []);
+      setSelectedExpId(nextWs.selectedExpId ?? null);
+      resetRuntimeForWorkspaceSwitch();
     }
   };
 
