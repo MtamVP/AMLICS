@@ -166,7 +166,11 @@ export type QuickSnippetId =
   | 'dist_boxplots'
   | 'corr_heatmap'
   | 'missing_cardinality'
-  | 'groupby_pivot';
+  | 'groupby_pivot'
+  | 'learning_curve'
+  | 'error_analysis'
+  | 'threshold_tuning'
+  | 'export_model_pkl';
 
 export interface FeatureImportanceItem {
   feature: string;

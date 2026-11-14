@@ -48,6 +48,10 @@ interface RightStudioPaneProps {
   onDropLeakageCols: () => void;
   onInsertDatetimeCell: () => void;
   onInstallPackage: (pkg: string) => void;
+  onRunTournament?: () => void;
+  isTournamentRunning?: boolean;
+  onStopTournament?: () => void;
+  onApplyQuickFix?: (kind: 'regularize' | 'balance' | 'boost') => void;
   externalTab?: 'leaderboard' | 'diagnostics' | 'data' | 'predict' | null;
 }
 
@@ -75,9 +79,14 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
   onDropLeakageCols,
   onInsertDatetimeCell,
   onInstallPackage,
+  onRunTournament,
+  isTournamentRunning,
+  onStopTournament,
+  onApplyQuickFix,
   externalTab,
 }) => {
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'diagnostics' | 'data' | 'predict'>('leaderboard');
+  const [decisionThreshold, setDecisionThreshold] = useState<number>(0.5);
   const [quickCmd, setQuickCmd] = useState<string>('');
   const [pipPkg, setPipPkg] = useState<string>('');
   const [cliExpanded, setCliExpanded] = useState<boolean>(false);
@@ -248,6 +257,36 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
         {/* ==================== TAB 1: LEADERBOARD ==================== */}
         {activeTab === 'leaderboard' && (
           <div className="space-y-3">
+            {onRunTournament && (
+              <div className="p-2.5 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium text-[#e8eaed]">
+                    Auto-Tournament (So sánh đa mô hình)
+                  </div>
+                  <div className="text-[10px] text-[#9aa0a6]">
+                    Tự động train Linear, RandomForest, ExtraTrees &amp; HistGB rồi xếp hạng.
+                  </div>
+                </div>
+                {isTournamentRunning ? (
+                  <button
+                    type="button"
+                    onClick={onStopTournament}
+                    className="px-2.5 py-1 rounded bg-[#f28b82]/20 border border-[#f28b82]/50 text-[#f28b82] text-[11px] font-medium shrink-0 hover:bg-[#f28b82]/30"
+                  >
+                    Stop
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onRunTournament}
+                    className="px-2.5 py-1 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] text-[11px] font-semibold shrink-0"
+                  >
+                    Compare 4 Models
+                  </button>
+                )}
+              </div>
+            )}
+
             {experiments.length > 0 && (
               <div className="flex items-center justify-between text-[11px] text-[#9aa0a6]">
                 <label className="flex items-center gap-1.5 cursor-pointer">
@@ -456,7 +495,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                         </div>
 
                         {health.badges.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mb-1.5">
+                          <div className="flex flex-wrap items-center gap-1 mb-1.5">
                             {health.badges.map((b, bIdx) => (
                               <span
                                 key={bIdx}
@@ -472,6 +511,36 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                                 {b.label}
                               </span>
                             ))}
+                            {onApplyQuickFix &&
+                              health.badges.some((b) =>
+                                /overfit/i.test(b.label)
+                              ) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onApplyQuickFix('regularize');
+                                  }}
+                                  className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#8ab4f8]/15 border border-[#8ab4f8]/40 text-[#8ab4f8] hover:bg-[#8ab4f8]/25"
+                                >
+                                  ⚡ Fix Overfit
+                                </button>
+                              )}
+                            {onApplyQuickFix &&
+                              health.badges.some((b) =>
+                                /underfit|low/i.test(b.label)
+                              ) && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onApplyQuickFix('boost');
+                                  }}
+                                  className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-[#81c995]/15 border border-[#81c995]/40 text-[#81c995] hover:bg-[#81c995]/25"
+                                >
+                                  ⚡ Boost Capacity
+                                </button>
+                              )}
                           </div>
                         )}
 
@@ -1090,9 +1159,47 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                     <div className="text-[10px] font-mono text-[#9aa0a6]">
                       Predicted {config.targetColumn}:
                     </div>
-                    <div className="text-lg font-mono font-semibold text-[#81c995]">
-                      {String(whatIfResult.prediction)}
-                    </div>
+                    {(() => {
+                      const probEntries = whatIfResult.probabilities
+                        ? Object.entries(whatIfResult.probabilities)
+                        : [];
+                      const isBinaryProba =
+                        taskType === 'classification' && probEntries.length === 2;
+                      const displayedPrediction = isBinaryProba
+                        ? probEntries[1][1] >= decisionThreshold
+                          ? probEntries[1][0]
+                          : probEntries[0][0]
+                        : String(whatIfResult.prediction);
+                      return (
+                        <>
+                          <div className="text-lg font-mono font-semibold text-[#81c995]">
+                            {displayedPrediction}
+                          </div>
+                          {isBinaryProba && (
+                            <div className="p-2 rounded bg-[#18191a] border border-[#292a2d] space-y-1">
+                              <div className="flex items-center justify-between text-[10px] font-mono">
+                                <span className="text-[#9aa0a6]">Decision Threshold</span>
+                                <span className="text-[#8ab4f8] font-semibold">
+                                  {decisionThreshold.toFixed(2)}
+                                </span>
+                              </div>
+                              <input
+                                type="range"
+                                min={0.1}
+                                max={0.9}
+                                step={0.05}
+                                value={decisionThreshold}
+                                onChange={(e) => setDecisionThreshold(Number(e.target.value))}
+                                className="w-full accent-[#8ab4f8] cursor-pointer"
+                              />
+                              <div className="text-[10px] text-[#9aa0a6]">
+                                Giảm ngưỡng → tăng Recall (ít bỏ sót). Tăng ngưỡng → tăng Precision (chắc chắn hơn).
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                     {whatIfResult.probabilities && (
                       <div className="space-y-1 pt-1 border-t border-[#292a2d]">
                         <div className="text-[10px] font-mono text-[#9aa0a6]">

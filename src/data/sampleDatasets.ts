@@ -32,6 +32,26 @@ export const QUICK_SNIPPETS: QuickSnippetPreset[] = [
     label: 'Bảng Pivot theo nhóm (GroupBy)',
     description: 'Thống kê giá trị trung bình Target theo từng nhóm của cột phân loại.',
   },
+  {
+    id: 'learning_curve',
+    label: 'Learning Curve (Chẩn đoán Overfitting / Thêm dữ liệu)',
+    description: 'Vẽ đường cong học tập Train vs CV theo kích thước dữ liệu để biết model đang Overfit hay Underfit.',
+  },
+  {
+    id: 'error_analysis',
+    label: 'Error Analysis (Top 10 mẫu dự đoán sai nặng nhất)',
+    description: 'Liệt kê các dòng trong tập Test có sai số lớn nhất để hiểu nguyên nhân mô hình dự đoán nhầm.',
+  },
+  {
+    id: 'threshold_tuning',
+    label: 'Threshold Tuning (Tối ưu ngưỡng Precision / Recall / F1)',
+    description: 'Quét ngưỡng xác suất từ 0.10 -> 0.90 cho phân loại nhị phân để tìm ngưỡng F1 cao nhất.',
+  },
+  {
+    id: 'export_model_pkl',
+    label: 'Lưu & Kiểm thử Model (model.pkl với joblib)',
+    description: 'Xuất full_pipeline ra file model.pkl và kiểm tra nạp lại dự đoán thử.',
+  },
 ];
 
 export interface PublicDatasetPreset {

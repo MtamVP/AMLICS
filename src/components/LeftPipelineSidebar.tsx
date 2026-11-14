@@ -692,6 +692,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
           {openSection === 2 && (
             <div className="px-3.5 pb-3.5 pt-1 space-y-3 bg-[#18191a]">
+              <div className="p-2 rounded bg-[#202124] border border-[#3c4043] text-[10px] text-[#9aa0a6] leading-relaxed">
+                <span className="text-[#8ab4f8] font-semibold">Học ML:</span> Mọi bước Impute/Scale/Encode đều nằm trong <code>ColumnTransformer</code> để chỉ <code>fit</code> trên tập Train, tránh <b>Data Leakage</b>. Chọn <b>RobustScaler</b> nếu dữ liệu nhiều ngoại lai (outliers).
+              </div>
               <div className="space-y-2">
                 <span className="text-[11px] font-medium text-[#9aa0a6] block">
                   Numeric pipeline
@@ -932,6 +935,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
           {openSection === 3 && (
             <div className="px-3.5 pb-3.5 pt-1 space-y-3 bg-[#18191a]">
+              <div className="p-2 rounded bg-[#202124] border border-[#3c4043] text-[10px] text-[#9aa0a6] leading-relaxed">
+                <span className="text-[#8ab4f8] font-semibold">Học ML:</span> Dùng <b>StratifiedKFold</b> cho phân loại mất cân bằng lớp, <b>GroupKFold</b> nếu nhiều dòng thuộc cùng 1 User/ID, và <b>TimeSeriesSplit</b> cho dữ liệu theo thời gian.
+              </div>
               <div>
                 <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
                   <span>Cross-Validation Strategy</span>
@@ -1129,6 +1135,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
           {openSection === 4 && (
             <div className="px-3.5 pb-4 pt-1 space-y-3 bg-[#18191a]">
+              <div className="p-2 rounded bg-[#202124] border border-[#3c4043] text-[10px] text-[#9aa0a6] leading-relaxed">
+                <span className="text-[#8ab4f8] font-semibold">Học ML:</span> Tăng <code>max_depth</code> làm mô hình học chi tiết hơn nhưng dễ <b>Overfit</b>. Nếu Train cao hơn CV nhiều, hãy giảm <code>max_depth</code> hoặc tăng <code>l2_reg</code>.
+              </div>
               <div>
                 <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
                   <span>Estimator</span>

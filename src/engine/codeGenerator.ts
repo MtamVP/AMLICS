@@ -1581,6 +1581,142 @@ else:
     plt.tight_layout()
     pivot_df`;
       break;
+
+    case 'learning_curve':
+      title = `Learning Curve (${dsLabel})`;
+      subtitle = 'Đường cong học tập Train vs CV — chẩn đoán Overfitting / Underfitting';
+      code = `# Đường cong học tập (Learning Curve) cho full_pipeline
+from sklearn.base import clone
+from sklearn.model_selection import learning_curve
+
+if 'full_pipeline' not in globals() or 'X_train' not in globals():
+    raise RuntimeError("Hãy chạy đủ 5 cell pipeline trước khi vẽ Learning Curve.")
+
+_lc_metric = '${isClass ? 'accuracy' : 'neg_root_mean_squared_error'}'
+_train_sizes, _train_scores, _val_scores = learning_curve(
+    clone(full_pipeline),
+    X_train,
+    y_train,
+    cv=min(3, ${config.cvFolds}),
+    train_sizes=np.linspace(0.2, 1.0, 5),
+    scoring=_lc_metric,
+    n_jobs=1
+)
+_tr_mean = np.abs(_train_scores.mean(axis=1)) if 'neg_' in _lc_metric else _train_scores.mean(axis=1)
+_va_mean = np.abs(_val_scores.mean(axis=1)) if 'neg_' in _lc_metric else _val_scores.mean(axis=1)
+_tr_std = _train_scores.std(axis=1)
+_va_std = _val_scores.std(axis=1)
+
+plt.style.use('dark_background')
+fig, ax = plt.subplots(figsize=(8.2, 3.6), dpi=115)
+fig.patch.set_facecolor('#202124')
+ax.set_facecolor('#18191a')
+ax.plot(_train_sizes, _tr_mean, 'o-', color='#8ab4f8', lw=2, label='Train')
+ax.fill_between(_train_sizes, _tr_mean - _tr_std, _tr_mean + _tr_std, alpha=0.12, color='#8ab4f8')
+ax.plot(_train_sizes, _va_mean, 'o-', color='#81c995', lw=2, label='Validation (CV)')
+ax.fill_between(_train_sizes, _va_mean - _va_std, _va_mean + _va_std, alpha=0.12, color='#81c995')
+ax.set_title('Learning Curve (Train vs CV)', fontsize=10, color='#e8eaed')
+ax.set_xlabel('Số lượng mẫu Train', fontsize=9)
+ax.set_ylabel('RMSE' if 'neg_' in _lc_metric else 'Accuracy', fontsize=9)
+ax.legend(fontsize=8)
+ax.grid(alpha=0.12)
+plt.tight_layout()
+print(f"Final Train: {_tr_mean[-1]:.4f} | Final CV: {_va_mean[-1]:.4f}")`;
+      break;
+
+    case 'error_analysis':
+      title = `Error Analysis (${dsLabel})`;
+      subtitle = 'Top 10 mẫu trên tập Test có sai số / nhầm lẫn lớn nhất';
+      code = `# Phân tích lỗi (Error Analysis) trên tập Holdout X_test
+if 'full_pipeline' not in globals() or 'X_test' not in globals():
+    raise RuntimeError("Hãy chạy đủ 5 cell pipeline trước khi phân tích lỗi.")
+
+_err_df = X_test.copy()
+_y_true_arr = np.asarray(y_test)
+_y_pred_arr = np.asarray(full_pipeline.predict(X_test))
+_err_df['y_true'] = _y_true_arr
+_err_df['y_pred'] = _y_pred_arr
+
+if '${config.taskType}' == 'classification':
+    if hasattr(full_pipeline, 'predict_proba') and len(np.unique(_y_true_arr)) == 2:
+        _prob1 = full_pipeline.predict_proba(X_test)[:, 1]
+        _err_df['prob_1'] = np.round(_prob1, 4)
+        _err_df['error_margin'] = np.abs(_y_true_arr - _prob1)
+    else:
+        _err_df['error_margin'] = (_y_true_arr != _y_pred_arr).astype(float)
+    _mis = _err_df[_err_df['y_true'] != _err_df['y_pred']].sort_values('error_margin', ascending=False)
+    print(f"Tổng số mẫu dự đoán sai: {len(_mis):,} / {len(_err_df):,} ({len(_mis)/max(1,len(_err_df))*100:.1f}%)")
+    _top_errors = _mis.head(10)
+else:
+    _err_df['abs_error'] = np.abs(_y_true_arr - _y_pred_arr)
+    _top_errors = _err_df.sort_values('abs_error', ascending=False).head(10)
+    print(f"MAE trung bình: {_err_df['abs_error'].mean():.4f} | Sai số lớn nhất: {_err_df['abs_error'].max():.4f}")
+
+_top_errors`;
+      break;
+
+    case 'threshold_tuning':
+      title = `Threshold Tuning (${dsLabel})`;
+      subtitle = 'Quét ngưỡng 0.10 -> 0.90 để cân bằng Precision / Recall / F1';
+      code = `# Tối ưu ngưỡng quyết định (Decision Threshold) cho phân loại nhị phân
+from sklearn.metrics import precision_score, recall_score, f1_score
+
+if 'full_pipeline' not in globals() or 'X_test' not in globals():
+    raise RuntimeError("Hãy chạy đủ 5 cell pipeline trước.")
+if '${config.taskType}' != 'classification' or len(np.unique(y_test)) != 2 or not hasattr(full_pipeline, 'predict_proba'):
+    print("Threshold Tuning áp dụng cho bài toán Phân loại nhị phân (2 lớp) có predict_proba.")
+else:
+    _probs = full_pipeline.predict_proba(X_test)[:, 1]
+    _ths = np.linspace(0.10, 0.90, 17)
+    _precs, _recs, _f1s = [], [], []
+    for _t in _ths:
+        _p = (_probs >= _t).astype(int)
+        _precs.append(precision_score(y_test, _p, zero_division=0))
+        _recs.append(recall_score(y_test, _p, zero_division=0))
+        _f1s.append(f1_score(y_test, _p, zero_division=0))
+    _best_idx = int(np.argmax(_f1s))
+    print(f"Ngưỡng F1 tối ưu: {_ths[_best_idx]:.2f} -> F1={_f1s[_best_idx]:.4f} (Precision={_precs[_best_idx]:.4f}, Recall={_recs[_best_idx]:.4f})")
+
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(8.2, 3.4), dpi=115)
+    fig.patch.set_facecolor('#202124')
+    ax.set_facecolor('#18191a')
+    ax.plot(_ths, _precs, 'o-', color='#8ab4f8', label='Precision')
+    ax.plot(_ths, _recs, 'o-', color='#fdd663', label='Recall')
+    ax.plot(_ths, _f1s, 'o-', color='#81c995', lw=2, label='F1-Score')
+    ax.axvline(_ths[_best_idx], color='#f28b82', linestyle='--', label=f'Best Th={_ths[_best_idx]:.2f}')
+    ax.set_title('Precision / Recall / F1 theo Ngưỡng xác suất', fontsize=10, color='#e8eaed')
+    ax.set_xlabel('Threshold', fontsize=9)
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.12)
+    plt.tight_layout()`;
+      break;
+
+    case 'export_model_pkl':
+      title = `Export model.pkl (${dsLabel})`;
+      subtitle = 'Lưu full_pipeline bằng joblib & kiểm tra dự đoán sau khi nạp lại';
+      code = `# Lưu mô hình (full_pipeline) ra file model.pkl và kiểm tra round-trip
+import joblib
+
+if 'full_pipeline' not in globals():
+    raise RuntimeError("Chưa có full_pipeline. Hãy chạy Cell Train Model trước.")
+
+_artifact = {
+    'pipeline': full_pipeline,
+    'features': list(X_train.columns),
+    'target': TARGET_COL,
+    'label_encoder': globals().get('target_label_encoder', None),
+}
+_pkl_path = '/tmp/model.pkl' if os.path.exists('/tmp') else 'model.pkl'
+joblib.dump(_artifact, _pkl_path)
+if _pkl_path != 'model.pkl':
+    joblib.dump(_artifact, 'model.pkl')
+
+_loaded = joblib.load(_pkl_path)
+_sample_pred = _loaded['pipeline'].predict(X_test.head(3))
+print(f"Đã lưu thành công: {_pkl_path} ({os.path.getsize(_pkl_path)/1024:.1f} KB)")
+print("Dự đoán thử 3 dòng đầu X_test sau khi reload:", _sample_pred)`;
+      break;
   }
 
   return {

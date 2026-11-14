@@ -227,3 +227,82 @@ test('Codegen supports cloud_path (.parquet, .tsv, .csv), _smart_read_csv, and i
   const evalCode = codeGenMod.generateCell5Evaluate(cfg);
   assert.ok(evalCode.includes('if _use_df_test:'));
 });
+
+test('New ML Learning Quick Snippets (learning_curve, error_analysis, threshold_tuning, export_model_pkl) execute cleanly in Python', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'amlics_e2e_'));
+  try {
+    const csvPath = path.join(tmpDir, 'train.csv').replace(/\\/g, '/');
+    const rows = ['id,x1,x2,cat,target'];
+    for (let i = 1; i <= 100; i++) {
+      rows.push(`${i},${(i * 0.7).toFixed(2)},${(i % 9) * 1.5},${i % 2 === 0 ? 'A' : 'B'},${i % 3 === 0 ? 1 : 0}`);
+    }
+    fs.writeFileSync(csvPath, rows.join('\n'), 'utf8');
+
+    const cfg = {
+      datasetSource: 'cloud_path',
+      cloudDatasetPath: csvPath,
+      uploadedFileName: 'train.csv',
+      testUploadedFileName: '',
+      publicDatasetUrl: '',
+      targetColumn: 'target',
+      taskType: 'classification',
+      idColumnForSubmission: 'id',
+      dropColumns: ['id'],
+      numericColumns: ['x1', 'x2'],
+      categoricalColumns: ['cat'],
+      dropDuplicates: true,
+      subsampleRows: 0,
+      numericImputer: 'median',
+      numericScaler: 'robust',
+      addMissingIndicator: false,
+      logTransformNumeric: false,
+      polynomialInteractions: false,
+      varianceThreshold: true,
+      featureSelection: 'none',
+      categoricalImputer: 'most_frequent',
+      categoricalEncoder: 'onehot',
+      maxOneHotCategories: 20,
+      testSize: 0.2,
+      cvFolds: 3,
+      cvStrategy: 'stratified_kfold',
+      groupColumn: '',
+      imbalanceStrategy: 'none',
+      scoringMetric: 'auto',
+      modelFamily: 'HistGradientBoosting',
+      tuningStrategy: 'none',
+      tuningTrials: 3,
+      hyperparameters: {
+        nEstimators: 20,
+        learningRate: 0.1,
+        maxDepth: 3,
+        minSamplesLeaf: 5,
+        l2Regularization: 1.0,
+        subsample: 0.8,
+        earlyStopping: false,
+        randomState: 42,
+      },
+      autoFlags: {},
+    };
+
+    const baseCells = codeGenMod.buildAllPipelineCells(cfg).filter((c) => c.cellType === 'code');
+    const snippets = ['learning_curve', 'error_analysis', 'threshold_tuning', 'export_model_pkl'].map((id, idx) =>
+      codeGenMod.generateQuickSnippetCell(id, cfg, 10 + idx)
+    );
+
+    const scriptParts = [
+      'import os',
+      'import matplotlib',
+      'matplotlib.use("Agg")',
+      `os.chdir(${JSON.stringify(tmpDir)})`,
+      'GLOBAL_NS = {}',
+      ...baseCells.map((c) => `exec(${JSON.stringify(c.generatedCode)}, GLOBAL_NS)`),
+      ...snippets.map((s) => `exec(${JSON.stringify(s.generatedCode)}, GLOBAL_NS)`),
+      'assert os.path.exists("model.pkl"), "model.pkl missing"',
+    ];
+    const pyFile = path.join(tmpDir, 'run_snippets.py');
+    fs.writeFileSync(pyFile, scriptParts.join('\n'), 'utf8');
+    execFileSync('python', [pyFile], { stdio: 'pipe', timeout: 60000 });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

@@ -100,6 +100,7 @@ export function App() {
   const [runningCellId, setRunningCellId] = useState<string | null>(null);
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [isPipelineRunning, setIsPipelineRunning] = useState<boolean>(false);
+  const [isTournamentRunning, setIsTournamentRunning] = useState<boolean>(false);
   const [hasSubmissionCsv, setHasSubmissionCsv] = useState<boolean>(false);
   const [showLeftPanel, setShowLeftPanel] = useState<boolean>(true);
   const [showRightPanel, setShowRightPanel] = useState<boolean>(true);
@@ -908,6 +909,93 @@ export function App() {
       await handleRunFromCell(firstCell.id);
     }
   }, [handleRunFromCell]);
+
+  const handleRunModelTournament = useCallback(async () => {
+    if (runningCellId || isPipelineRunning || isTournamentRunning) return;
+    if (cellsRef.current.length === 0) return;
+
+    const models: ModelFamily[] =
+      runtimeModeRef.current === 'cloud'
+        ? ['LinearModel', 'RandomForest', 'ExtraTrees', 'HistGradientBoosting', 'LightGBM']
+        : ['LinearModel', 'RandomForest', 'ExtraTrees', 'HistGradientBoosting'];
+
+    stopRequestedRef.current = false;
+    setIsPipelineRunning(true);
+    setIsTournamentRunning(true);
+    appendCliLog('system', `[Tournament] Bắt đầu so sánh ${models.length} mô hình: ${models.join(', ')}...`);
+
+    try {
+      // Ensure prerequisite steps (data_load, preprocess, split_cv) succeeded
+      const prereqSteps = ['data_load', 'preprocess', 'split_cv'];
+      for (const step of prereqSteps) {
+        if (stopRequestedRef.current) break;
+        const c = cellsRef.current.find((cell) => cell.stepType === step);
+        if (c && c.status !== 'success') {
+          const ok = await executeSingleCell(c.id);
+          if (!ok || stopRequestedRef.current) return;
+        }
+      }
+
+      for (const model of models) {
+        if (stopRequestedRef.current) break;
+        appendCliLog('system', `[Tournament] Đang huấn luyện ${model}...`);
+        setConfig((prev) => ({
+          ...prev,
+          modelFamily: model,
+          autoSelectedFields: (prev.autoSelectedFields || []).filter((f) => f !== 'modelFamily'),
+        }));
+        await new Promise((r) => setTimeout(r, 80));
+
+        const trainCell = cellsRef.current.find((c) => c.stepType === 'model_train');
+        const evalCell = cellsRef.current.find((c) => c.stepType === 'evaluate');
+        if (!trainCell || !evalCell) break;
+
+        const okTrain = await executeSingleCell(trainCell.id);
+        if (!okTrain || stopRequestedRef.current) continue;
+        await executeSingleCell(evalCell.id);
+      }
+
+      if (!stopRequestedRef.current) {
+        appendCliLog('system', '[Tournament] Hoàn tất so sánh! Xem bảng xếp hạng ở tab Leaderboard.');
+      }
+    } finally {
+      setIsTournamentRunning(false);
+      setIsPipelineRunning(false);
+    }
+  }, [runningCellId, isPipelineRunning, isTournamentRunning, appendCliLog, executeSingleCell]);
+
+  const handleApplyQuickFix = useCallback(
+    (kind: 'regularize' | 'balance' | 'boost') => {
+      if (kind === 'regularize') {
+        setConfig((prev) => ({
+          ...prev,
+          hyperparameters: {
+            ...prev.hyperparameters,
+            maxDepth: Math.max(2, Math.min(4, prev.hyperparameters.maxDepth - 2)),
+            minSamplesLeaf: Math.max(10, prev.hyperparameters.minSamplesLeaf * 2),
+            l2Regularization: Number(Math.max(2.0, prev.hyperparameters.l2Regularization * 2).toFixed(2)),
+            earlyStopping: true,
+          },
+        }));
+        appendCliLog('system', '[ML Coach] Đã giảm max_depth, tăng min_samples_leaf & L2 để chống Overfitting. Hãy bấm Run all để kiểm chứng.');
+      } else if (kind === 'balance') {
+        setConfig((prev) => ({ ...prev, imbalanceStrategy: 'class_weight' }));
+        appendCliLog('system', '[ML Coach] Đã bật imbalanceStrategy = class_weight để cân bằng lớp thiểu số.');
+      } else {
+        setConfig((prev) => ({
+          ...prev,
+          modelFamily: 'HistGradientBoosting',
+          hyperparameters: {
+            ...prev.hyperparameters,
+            nEstimators: Math.min(400, Math.max(150, prev.hyperparameters.nEstimators + 80)),
+            maxDepth: Math.max(6, prev.hyperparameters.maxDepth + 2),
+          },
+        }));
+        appendCliLog('system', '[ML Coach] Đã tăng n_estimators & max_depth với HistGradientBoosting để cải thiện Underfitting.');
+      }
+    },
+    [appendCliLog]
+  );
 
   const handleRunActiveCell = useCallback(async () => {
     if (runningCellId) return;
@@ -2163,6 +2251,10 @@ ${metricLines}`;
               onDropLeakageCols={handleDropLeakageCols}
               onInsertDatetimeCell={handleInsertDatetimeCell}
               onInstallPackage={handleInstallPackage}
+              onRunTournament={handleRunModelTournament}
+              isTournamentRunning={isTournamentRunning}
+              onStopTournament={handleStopExecution}
+              onApplyQuickFix={handleApplyQuickFix}
               externalTab={rightTabOverride}
             />
           </div>
