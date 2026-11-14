@@ -2,8 +2,11 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { TopNavbar } from './components/TopNavbar';
 import { LeftPipelineSidebar } from './components/LeftPipelineSidebar';
 import { CenterNotebookPane } from './components/CenterNotebookPane';
-import { RightStudioPane } from './components/RightStudioPane';
+import { RightStudioPane, WhatIfResult } from './components/RightStudioPane';
 import { CloudConnectModal } from './components/CloudConnectModal';
+import { AiByokModal } from './components/AiByokModal';
+import { computeAutoOptimizedConfig } from './utils/autoOptimizer';
+import { AiOptimizationPlan } from './utils/aiByokClient';
 import {
   createDefaultPipelineConfig,
   PUBLIC_URL_PRESETS,
@@ -29,6 +32,7 @@ import {
   ExperimentRecord,
   HardwareInfo,
   NotebookCell,
+  NotebookWorkspaceMeta,
   PipelineConfig,
   PipelineTemplateId,
   QuickSnippetId,
@@ -49,6 +53,13 @@ import {
 
 const EXP_STORAGE_KEY = 'amlics_experiments_v2';
 const CONFIG_STORAGE_KEY = 'amlics_pipeline_config_v2';
+const WORKSPACES_STORAGE_KEY = 'amlics_workspaces_v1';
+
+interface StoredWorkspaceSnapshot extends NotebookWorkspaceMeta {
+  config: PipelineConfig;
+  cells: NotebookCell[];
+  dataProfile: DataProfile | null;
+}
 
 function triggerBrowserDownload(filename: string, textContent: string) {
   const blob = new Blob([textContent], { type: 'text/csv;charset=utf-8' });
@@ -103,6 +114,33 @@ export function App() {
   const [cloudWorkerStatus, setCloudWorkerStatus] = useState<WorkerStatus>('offline');
   const [cloudHardware, setCloudHardware] = useState<HardwareInfo | null>(null);
   const [isCloudModalOpen, setIsCloudModalOpen] = useState<boolean>(false);
+  const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
+  const [whatIfLoading, setWhatIfLoading] = useState<boolean>(false);
+  const [whatIfResult, setWhatIfResult] = useState<WhatIfResult | null>(null);
+  const [workspaces, setWorkspaces] = useState<StoredWorkspaceSnapshot[]>(() => {
+    try {
+      const raw = localStorage.getItem(WORKSPACES_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as StoredWorkspaceSnapshot[];
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [
+      {
+        id: 'ws_default',
+        name: 'AMLICS_Pipeline_Notebook',
+        updatedAt: Date.now(),
+        config: createDefaultPipelineConfig(),
+        cells: [],
+        dataProfile: null,
+      },
+    ];
+  });
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(
+    () => workspaces[0]?.id || 'ws_default'
+  );
 
   const [experiments, setExperiments] = useState<ExperimentRecord[]>(() => {
     try {
@@ -346,6 +384,13 @@ export function App() {
           dropColumns: dropCols,
           numericColumns: numCols,
           categoricalColumns: catCols,
+          autoSelectedFields: Array.from(
+            new Set([
+              ...(prev.autoSelectedFields || []),
+              'taskType',
+              'cvStrategy',
+            ]),
+          ),
         };
       });
     },
@@ -386,6 +431,33 @@ export function App() {
       }
       if (has_submission_csv) {
         setHasSubmissionCsv(true);
+      }
+
+      if (cell_id === 'whatif_predict') {
+        setWhatIfLoading(false);
+        const text = stdout_summary || '';
+        const markerIdx = text.lastIndexOf('__WHATIF__:');
+        if (markerIdx !== -1) {
+          try {
+            const jsonStr = text.slice(markerIdx + '__WHATIF__:'.length).trim().split('\n')[0];
+            const parsed = JSON.parse(jsonStr) as WhatIfResult;
+            setWhatIfResult(parsed);
+          } catch {
+            setWhatIfResult({
+              prediction: '',
+              error: text || 'Không parse được kết quả dự đoán.',
+            });
+          }
+        } else {
+          setWhatIfResult({
+            prediction: '',
+            error:
+              status === 'error'
+                ? text || 'Lỗi khi chạy full_pipeline.predict(). Hãy chạy Run all trước.'
+                : text || 'Chưa có full_pipeline trong bộ nhớ. Hãy chạy Run all trước.',
+          });
+        }
+        return;
       }
 
       setCells((prev) =>
@@ -1267,6 +1339,256 @@ ${metricLines}`;
     }
   };
 
+  // ==================== SMART AUTO-OPTIMIZE, AI BYOK, WHAT-IF & MULTI-NOTEBOOK ====================
+  useEffect(() => {
+    if (!workspaceHydratedRef.current) return;
+    setWorkspaces((prev) => {
+      const lightweightCells = cells.map((c) => ({ ...c, figures: [] }));
+      const next = prev.map((w) =>
+        w.id === activeWorkspaceId
+          ? {
+              ...w,
+              name: projectName,
+              updatedAt: Date.now(),
+              config,
+              cells: lightweightCells,
+              dataProfile,
+            }
+          : w
+      );
+      try {
+        localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore storage quota errors
+      }
+      return next;
+    });
+  }, [activeWorkspaceId, projectName, config, cells, dataProfile]);
+
+  const handleSelectWorkspace = (targetId: string) => {
+    if (targetId === activeWorkspaceId) return;
+    const target = workspaces.find((w) => w.id === targetId);
+    if (!target) return;
+    setActiveWorkspaceId(target.id);
+    setProjectName(target.name);
+    setConfig(target.config);
+    lastProfileDatasetRef.current = target.dataProfile?.dataset_name || '';
+    setDataProfile(target.dataProfile);
+    setCells(
+      target.cells && target.cells.length > 0
+        ? target.cells
+        : buildAllPipelineCells(target.config, [])
+    );
+    setWhatIfResult(null);
+    appendCliLog('system', `Switched to notebook: ${target.name}.ipynb`);
+  };
+
+  const handleCreateWorkspace = () => {
+    const newId = `ws_${Date.now()}`;
+    const newName = `AMLICS_Notebook_${workspaces.length + 1}`;
+    const defaultCfg = createDefaultPipelineConfig();
+    const initialCells = buildAllPipelineCells(defaultCfg, []);
+    const newWs: StoredWorkspaceSnapshot = {
+      id: newId,
+      name: newName,
+      updatedAt: Date.now(),
+      config: defaultCfg,
+      cells: initialCells,
+      dataProfile: null,
+    };
+    const nextList = [...workspaces, newWs];
+    setWorkspaces(nextList);
+    try {
+      localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(nextList));
+    } catch {
+      // ignore
+    }
+    setActiveWorkspaceId(newId);
+    setProjectName(newName);
+    setConfig(defaultCfg);
+    lastProfileDatasetRef.current = '';
+    setDataProfile(null);
+    setCells(initialCells);
+    setWhatIfResult(null);
+    appendCliLog('system', `Created new notebook: ${newName}.ipynb`);
+  };
+
+  const handleDeleteWorkspace = (targetId: string) => {
+    if (workspaces.length <= 1) return;
+    const filtered = workspaces.filter((w) => w.id !== targetId);
+    setWorkspaces(filtered);
+    try {
+      localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(filtered));
+    } catch {
+      // ignore
+    }
+    if (activeWorkspaceId === targetId && filtered[0]) {
+      const nextWs = filtered[0];
+      setActiveWorkspaceId(nextWs.id);
+      setProjectName(nextWs.name);
+      setConfig(nextWs.config);
+      lastProfileDatasetRef.current = nextWs.dataProfile?.dataset_name || '';
+      setDataProfile(nextWs.dataProfile);
+      setCells(
+        nextWs.cells && nextWs.cells.length > 0
+          ? nextWs.cells
+          : buildAllPipelineCells(nextWs.config, [])
+      );
+      setWhatIfResult(null);
+    }
+  };
+
+  const handleAutoOptimize = () => {
+    if (!dataProfile) {
+      appendCliLog(
+        'system',
+        '[Auto-Advisor] Vui lòng Load hoặc Upload dataset trước khi Auto-Optimize.'
+      );
+      return;
+    }
+    const { nextConfig, reasons } = computeAutoOptimizedConfig(dataProfile, config);
+    setConfig(nextConfig);
+    appendCliLog(
+      'system',
+      `[Auto-Advisor] Đã tối ưu hóa cấu hình cho điểm cao nhất (${nextConfig.taskType}, ${nextConfig.modelFamily}, ${nextConfig.cvStrategy} ${nextConfig.cvFolds}-fold):\n- ${reasons.join('\n- ')}`
+    );
+  };
+
+  const handleApplyAiOptimization = (plan: AiOptimizationPlan) => {
+    const autoList = Array.from(
+      new Set([
+        ...(config.autoSelectedFields || []),
+        'taskType',
+        'numericImputer',
+        'numericScaler',
+        'categoricalEncoder',
+        'cvStrategy',
+        'scoringMetric',
+        'imbalanceStrategy',
+        'modelFamily',
+        'tuningStrategy',
+      ])
+    );
+
+    setConfig((prev) => ({
+      ...prev,
+      ...(plan.taskType ? { taskType: plan.taskType } : {}),
+      ...(plan.numericImputer ? { numericImputer: plan.numericImputer } : {}),
+      ...(plan.numericScaler ? { numericScaler: plan.numericScaler } : {}),
+      ...(typeof plan.logTransformNumeric === 'boolean'
+        ? { logTransformNumeric: plan.logTransformNumeric }
+        : {}),
+      ...(typeof plan.polynomialInteractions === 'boolean'
+        ? { polynomialInteractions: plan.polynomialInteractions }
+        : {}),
+      ...(plan.categoricalEncoder
+        ? { categoricalEncoder: plan.categoricalEncoder }
+        : {}),
+      ...(plan.featureSelection
+        ? { featureSelection: plan.featureSelection }
+        : {}),
+      ...(plan.cvStrategy ? { cvStrategy: plan.cvStrategy } : {}),
+      ...(plan.imbalanceStrategy
+        ? { imbalanceStrategy: plan.imbalanceStrategy }
+        : {}),
+      ...(plan.modelFamily ? { modelFamily: plan.modelFamily } : {}),
+      ...(plan.tuningStrategy ? { tuningStrategy: plan.tuningStrategy } : {}),
+      hyperparameters: {
+        ...prev.hyperparameters,
+        ...(plan.hyperparameters || {}),
+      },
+      autoSelectedFields: autoList,
+    }));
+
+    appendCliLog(
+      'system',
+      `[AI Copilot] Đã áp dụng cấu hình AI (${plan.explanation})`
+    );
+  };
+
+  const handleInsertAiCell = (title: string, code: string) => {
+    const newCell: NotebookCell = {
+      id: `cell_ai_${Date.now()}`,
+      order: cells.length + 1,
+      cellType: 'code',
+      stepType: 'custom',
+      title,
+      subtitle: 'Generated by AI Copilot (BYOK)',
+      generatedCode: code,
+      currentCode: code,
+      status: 'idle',
+      isLocked: true,
+      outputText: '',
+      figures: [],
+    };
+    setCells((prev) => {
+      const idx = activeCellId
+        ? prev.findIndex((c) => c.id === activeCellId)
+        : prev.length - 1;
+      const insertAt = idx >= 0 ? idx + 1 : prev.length;
+      const copy = [...prev];
+      copy.splice(insertAt, 0, newCell);
+      return copy.map((c, i) => ({ ...c, order: i + 1 }));
+    });
+    setActiveCellId(newCell.id);
+    appendCliLog('system', `[AI Copilot] Đã chèn cell mới: "${title}"`);
+  };
+
+  const handleWhatIfPredict = (row: Record<string, string | number>) => {
+    setWhatIfLoading(true);
+    setWhatIfResult(null);
+    const jsonPayload = JSON.stringify(row).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const code = [
+      'import json, pandas as pd',
+      "if 'full_pipeline' not in globals():",
+      "    print('__WHATIF__:' + json.dumps({'prediction': '', 'error': 'Chưa train full_pipeline. Hãy bấm Run all trước.'}))",
+      'else:',
+      `    _row_df = pd.DataFrame([json.loads('${jsonPayload}')])`,
+      '    _pred = full_pipeline.predict(_row_df)[0]',
+      "    _out = {'prediction': _pred.item() if hasattr(_pred, 'item') else str(_pred)}",
+      "    if hasattr(full_pipeline, 'predict_proba'):",
+      '        _probs = full_pipeline.predict_proba(_row_df)[0]',
+      "        _classes = getattr(full_pipeline, 'classes_', list(range(len(_probs))))",
+      "        _out['probabilities'] = {str(c): float(p) for c, p in zip(_classes, _probs)}",
+      "    print('__WHATIF__:' + json.dumps(_out))",
+    ].join('\n');
+
+    if (runtimeMode === 'cloud') {
+      if (!cloudConnected || cloudWorkerStatus === 'offline') {
+        setWhatIfLoading(false);
+        setWhatIfResult({
+          prediction: '',
+          error: 'Cloud runtime chưa kết nối. Hãy chạy ở Browser (Pyodide) hoặc Connect Cloud.',
+        });
+        return;
+      }
+      cloudBrokerRef.current?.sendRunCell({
+        id: 'whatif_predict',
+        order: 999,
+        cellType: 'code',
+        stepType: 'custom',
+        title: 'What-If Predict',
+        subtitle: '',
+        generatedCode: code,
+        currentCode: code,
+        isLocked: true,
+        status: 'running',
+        outputText: '',
+        figures: [],
+      });
+    } else {
+      pyodideWorkerRef.current?.postMessage({
+        type: 'run_cell',
+        payload: { cellId: 'whatif_predict', code },
+      });
+    }
+  };
+
+  const lastErrorText =
+    cells.find((c) => c.status === 'error')?.outputText ||
+    [...cliLogs].reverse().find((l) => l.stream === 'stderr')?.text ||
+    '';
+
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#18191a] text-[#e8eaed]">
       {/* Hidden File Inputs */}
@@ -1323,6 +1645,16 @@ ${metricLines}`;
         onImportIpynbClick={() => ipynbInputRef.current?.click()}
         onUploadCsvClick={() => trainCsvInputRef.current?.click()}
         onDownloadSubmissionCsv={handleDownloadSubmissionCsv}
+        workspaces={workspaces.map(({ id, name, updatedAt }) => ({
+          id,
+          name,
+          updatedAt,
+        }))}
+        activeWorkspaceId={activeWorkspaceId}
+        onSelectWorkspace={handleSelectWorkspace}
+        onCreateWorkspace={handleCreateWorkspace}
+        onDeleteWorkspace={handleDeleteWorkspace}
+        onOpenAiModal={() => setIsAiModalOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -1343,6 +1675,7 @@ ${metricLines}`;
                 setRuntimeMode('cloud');
                 setIsCloudModalOpen(true);
               }}
+              onAutoOptimize={handleAutoOptimize}
             />
           </div>
         )}
@@ -1375,6 +1708,7 @@ ${metricLines}`;
           <div className="w-[350px] xl:w-[390px] shrink-0 h-full overflow-hidden">
             <RightStudioPane
               taskType={config.taskType}
+              config={config}
               dataProfile={dataProfile}
               experiments={experiments}
               selectedExpId={selectedExpId}
@@ -1386,6 +1720,9 @@ ${metricLines}`;
               onClearLogs={() => setCliLogs([])}
               namespaceVars={namespaceVars}
               onRunQuickCommand={handleRunQuickCommand}
+              onWhatIfPredict={handleWhatIfPredict}
+              whatIfLoading={whatIfLoading}
+              whatIfResult={whatIfResult}
             />
           </div>
         )}
@@ -1433,6 +1770,17 @@ ${metricLines}`;
         workerStatus={cloudWorkerStatus}
         hardwareInfo={cloudHardware}
         onPingWorker={() => cloudBrokerRef.current?.sendPing()}
+      />
+
+      <AiByokModal
+        isOpen={isAiModalOpen}
+        onClose={() => setIsAiModalOpen(false)}
+        dataProfile={dataProfile}
+        config={config}
+        experiments={experiments}
+        lastErrorText={lastErrorText}
+        onApplyAiOptimization={handleApplyAiOptimization}
+        onInsertAiCell={handleInsertAiCell}
       />
     </div>
   );

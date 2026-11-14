@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
 import { PUBLIC_URL_PRESETS } from '../data/sampleDatasets';
+import { inferTaskTypeAndReason } from '../utils/autoOptimizer';
 import {
   CategoricalEncoderStrategy,
   CategoricalImputerStrategy,
@@ -30,6 +31,7 @@ interface LeftPipelineSidebarProps {
   onUploadTestCsvClick: () => void;
   onFetchPublicUrl: (url: string, presetId?: string) => void;
   onSwitchToCloud: () => void;
+  onAutoOptimize: () => void;
 }
 
 const MODEL_OPTIONS: { id: ModelFamily; label: string }[] = [
@@ -59,10 +61,27 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   onUploadTestCsvClick,
   onFetchPublicUrl,
   onSwitchToCloud,
+  onAutoOptimize,
 }) => {
   const [openSection, setOpenSection] = useState<number>(1);
   const [showAdvPrep, setShowAdvPrep] = useState<boolean>(false);
   const [showAdvHp, setShowAdvHp] = useState<boolean>(false);
+
+  const isAuto = (field: string) =>
+    Boolean(config.autoSelectedFields?.includes(field));
+
+  const stripAuto = (prev: PipelineConfig, field: string) =>
+    (prev.autoSelectedFields || []).filter((f) => f !== field);
+
+  const AutoBadge = ({ field }: { field: string }) =>
+    isAuto(field) ? (
+      <span
+        title="Được chọn tự động bởi Smart Auto-Advisor / AI"
+        className="ml-1 px-1 py-0 rounded bg-[#8ab4f8]/15 border border-[#8ab4f8]/40 text-[#8ab4f8] font-mono text-[9px] leading-tight"
+      >
+        Auto
+      </span>
+    ) : null;
 
   const toggleSection = (sec: number) => {
     setOpenSection((prev) => (prev === sec ? 0 : sec));
@@ -92,9 +111,13 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   };
 
   const handleTargetChange = (newTarget: string) => {
+    const inferred = dataProfile
+      ? inferTaskTypeAndReason(dataProfile, newTarget)
+      : null;
     const colMeta = columns.find((c) => c.name === newTarget);
     const guessedTask: TaskType =
-      colMeta && colMeta.nunique <= 12 ? 'classification' : 'regression';
+      inferred?.taskType ||
+      (colMeta && colMeta.nunique <= 12 ? 'classification' : 'regression');
 
     onChangeConfig((prev) => ({
       ...prev,
@@ -105,8 +128,15 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
       numericColumns: prev.numericColumns.filter((c) => c !== newTarget),
       categoricalColumns: prev.categoricalColumns.filter((c) => c !== newTarget),
       dropColumns: prev.dropColumns.filter((c) => c !== newTarget),
+      autoSelectedFields: Array.from(
+        new Set([...(prev.autoSelectedFields || []), 'taskType', 'cvStrategy']),
+      ),
     }));
   };
+
+  const taskInference = dataProfile
+    ? inferTaskTypeAndReason(dataProfile, config.targetColumn)
+    : null;
 
   return (
     <aside className="w-full h-full bg-[#202124] border-r border-[#3c4043] flex flex-col overflow-hidden select-none">
@@ -119,6 +149,35 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
           sklearn.pipeline
         </span>
       </div>
+
+      {/* Smart Auto-Advisor */}
+      {dataProfile && (
+        <div className="px-3 py-2 bg-[#18191a] border-b border-[#3c4043] space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] font-mono text-[#8ab4f8] truncate">
+              {taskInference?.reason || `Task: ${config.taskType}`}
+            </span>
+            <button
+              type="button"
+              onClick={onAutoOptimize}
+              title="Tự động chọn toàn bộ preprocessing, CV, model & tham số tối ưu cho điểm cao nhất"
+              className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] text-[10px] font-semibold transition-colors cursor-pointer"
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>Auto-Optimize</span>
+            </button>
+          </div>
+          {config.autoSelectedFields && config.autoSelectedFields.length > 0 && (
+            <div className="text-[10px] text-[#9aa0a6] leading-tight">
+              Đang bật <span className="text-[#8ab4f8] font-mono">[Auto]</span> cho{' '}
+              <span className="text-[#e8eaed] font-mono">
+                {config.autoSelectedFields.length}
+              </span>{' '}
+              mục (chỉnh tay sẽ tự gỡ nhãn Auto).
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Large Dataset Warning Banner in Browser Wasm */}
       {runtimeMode === 'pyodide' && totalRows > 30000 && (
@@ -441,8 +500,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-[11px] text-[#9aa0a6] block mb-1">
-                    Task type
+                  <label className="text-[11px] text-[#9aa0a6] flex items-center mb-1">
+                    <span>Task type</span>
+                    <AutoBadge field="taskType" />
                   </label>
                   <select
                     value={config.taskType}
@@ -450,6 +510,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       onChangeConfig((p) => ({
                         ...p,
                         taskType: e.target.value as TaskType,
+                        autoSelectedFields: stripAuto(p, 'taskType'),
                       }))
                     }
                     className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8]"
@@ -637,8 +698,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                 </span>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                      Imputer
+                    <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
+                      <span>Imputer</span>
+                      <AutoBadge field="numericImputer" />
                     </label>
                     <select
                       value={config.numericImputer}
@@ -646,6 +708,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                         onChangeConfig((p) => ({
                           ...p,
                           numericImputer: e.target.value as NumericImputerStrategy,
+                          autoSelectedFields: stripAuto(p, 'numericImputer'),
                         }))
                       }
                       className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
@@ -658,8 +721,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                      Scaler
+                    <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
+                      <span>Scaler</span>
+                      <AutoBadge field="numericScaler" />
                     </label>
                     <select
                       value={config.numericScaler}
@@ -667,6 +731,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                         onChangeConfig((p) => ({
                           ...p,
                           numericScaler: e.target.value as NumericScalerStrategy,
+                          autoSelectedFields: stripAuto(p, 'numericScaler'),
                         }))
                       }
                       className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
@@ -751,8 +816,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     </select>
                   </div>
                   <div>
-                    <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                      Encoder
+                    <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
+                      <span>Encoder</span>
+                      <AutoBadge field="categoricalEncoder" />
                     </label>
                     <select
                       value={config.categoricalEncoder}
@@ -760,6 +826,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                         onChangeConfig((p) => ({
                           ...p,
                           categoricalEncoder: e.target.value as CategoricalEncoderStrategy,
+                          autoSelectedFields: stripAuto(p, 'categoricalEncoder'),
                         }))
                       }
                       className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
@@ -866,8 +933,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
           {openSection === 3 && (
             <div className="px-3.5 pb-3.5 pt-1 space-y-3 bg-[#18191a]">
               <div>
-                <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                  Cross-Validation Strategy
+                <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
+                  <span>Cross-Validation Strategy</span>
+                  <AutoBadge field="cvStrategy" />
                 </label>
                 <select
                   value={config.cvStrategy}
@@ -875,6 +943,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     onChangeConfig((p) => ({
                       ...p,
                       cvStrategy: e.target.value as CVStrategy,
+                      autoSelectedFields: stripAuto(p, 'cvStrategy'),
                     }))
                   }
                   className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] font-mono"
@@ -960,8 +1029,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                    Scoring Metric
+                  <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
+                    <span>Scoring Metric</span>
+                    <AutoBadge field="scoringMetric" />
                   </label>
                   <select
                     value={config.scoringMetric}
@@ -969,6 +1039,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       onChangeConfig((p) => ({
                         ...p,
                         scoringMetric: e.target.value as ScoringMetricStrategy,
+                        autoSelectedFields: stripAuto(p, 'scoringMetric'),
                       }))
                     }
                     className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed] font-mono"
@@ -1013,8 +1084,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
               {config.taskType === 'classification' && (
                 <div>
-                  <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                    Imbalance handling
+                  <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
+                    <span>Imbalance handling</span>
+                    <AutoBadge field="imbalanceStrategy" />
                   </label>
                   <select
                     value={config.imbalanceStrategy}
@@ -1022,6 +1094,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       onChangeConfig((p) => ({
                         ...p,
                         imbalanceStrategy: e.target.value as ImbalanceStrategy,
+                        autoSelectedFields: stripAuto(p, 'imbalanceStrategy'),
                       }))
                     }
                     className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed]"
@@ -1057,8 +1130,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
           {openSection === 4 && (
             <div className="px-3.5 pb-4 pt-1 space-y-3 bg-[#18191a]">
               <div>
-                <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                  Estimator
+                <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
+                  <span>Estimator</span>
+                  <AutoBadge field="modelFamily" />
                 </label>
                 <select
                   value={config.modelFamily}
@@ -1066,6 +1140,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     onChangeConfig((p) => ({
                       ...p,
                       modelFamily: e.target.value as ModelFamily,
+                      autoSelectedFields: stripAuto(p, 'modelFamily'),
                     }))
                   }
                   className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] font-mono focus:outline-none focus:border-[#8ab4f8]"
@@ -1080,8 +1155,9 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                    Hyperparameter Search
+                  <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
+                    <span>Hyperparameter Search</span>
+                    <AutoBadge field="tuningStrategy" />
                   </label>
                   <select
                     value={config.tuningStrategy}
@@ -1089,6 +1165,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       onChangeConfig((p) => ({
                         ...p,
                         tuningStrategy: e.target.value as TuningStrategy,
+                        autoSelectedFields: stripAuto(p, 'tuningStrategy'),
                       }))
                     }
                     className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"

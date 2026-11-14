@@ -4,11 +4,18 @@ import {
   PanelLeft,
   PanelRight,
   Play,
+  Plus,
   RotateCcw,
+  Sparkles,
   Square,
   Trash2,
 } from 'lucide-react';
-import { HardwareInfo, RuntimeMode, WorkerStatus } from '../types/studio';
+import {
+  HardwareInfo,
+  NotebookWorkspaceMeta,
+  RuntimeMode,
+  WorkerStatus,
+} from '../types/studio';
 
 interface TopNavbarProps {
   projectName: string;
@@ -41,6 +48,12 @@ interface TopNavbarProps {
   onImportIpynbClick: () => void;
   onUploadCsvClick: () => void;
   onDownloadSubmissionCsv: () => void;
+  workspaces: NotebookWorkspaceMeta[];
+  activeWorkspaceId: string;
+  onSelectWorkspace: (id: string) => void;
+  onCreateWorkspace: () => void;
+  onDeleteWorkspace: (id: string) => void;
+  onOpenAiModal: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -73,14 +86,25 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onImportIpynbClick,
   onUploadCsvClick,
   onDownloadSubmissionCsv,
+  workspaces,
+  activeWorkspaceId,
+  onSelectWorkspace,
+  onCreateWorkspace,
+  onDeleteWorkspace,
+  onOpenAiModal,
 }) => {
   const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const runMenuRef = useRef<HTMLDivElement | null>(null);
+  const wsMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
       if (runMenuRef.current && !runMenuRef.current.contains(e.target as Node)) {
         setRunMenuOpen(false);
+      }
+      if (wsMenuRef.current && !wsMenuRef.current.contains(e.target as Node)) {
+        setWsMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleOutside);
@@ -100,15 +124,81 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
           <span className="font-mono font-bold text-xs px-1.5 py-0.5 rounded bg-[#303134] text-[#e8eaed] border border-[#3c4043] tracking-tight">
             AMLICS
           </span>
-          <div className="flex items-center">
+          <div ref={wsMenuRef} className="relative flex items-center">
             <input
               type="text"
               value={projectName}
               onChange={(e) => onProjectNameChange(e.target.value)}
-              className="bg-transparent text-xs font-medium text-[#e8eaed] hover:bg-[#303134] focus:bg-[#303134] px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-[#8ab4f8] w-44 truncate"
+              className="bg-transparent text-xs font-medium text-[#e8eaed] hover:bg-[#303134] focus:bg-[#303134] px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-[#8ab4f8] w-40 truncate"
               title="Rename notebook"
             />
             <span className="text-xs text-[#9aa0a6] font-mono">.ipynb</span>
+            <button
+              type="button"
+              onClick={() => setWsMenuOpen((o) => !o)}
+              title="Chuyển đổi / Tạo Notebook mới"
+              className="ml-1 p-1 rounded hover:bg-[#303134] text-[#9aa0a6] hover:text-[#e8eaed] transition-colors flex items-center gap-0.5 text-[10px] font-mono"
+            >
+              <span>({workspaces.length})</span>
+              <ChevronDown className="w-3 h-3" />
+            </button>
+
+            {wsMenuOpen && (
+              <div className="absolute left-0 top-full mt-1 w-64 bg-[#292a2d] border border-[#3c4043] rounded shadow-xl py-1 z-50 text-xs">
+                <div className="px-3 py-1 text-[10px] font-mono text-[#9aa0a6] uppercase tracking-wider flex items-center justify-between">
+                  <span>Notebooks ({workspaces.length})</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWsMenuOpen(false);
+                      onCreateWorkspace();
+                    }}
+                    className="inline-flex items-center gap-1 text-[#8ab4f8] hover:underline font-sans normal-case"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>New Notebook</span>
+                  </button>
+                </div>
+                <div className="my-1 border-t border-[#3c4043]" />
+                <div className="max-h-56 overflow-y-auto">
+                  {workspaces.map((ws) => {
+                    const active = ws.id === activeWorkspaceId;
+                    return (
+                      <div
+                        key={ws.id}
+                        className={`px-3 py-1.5 flex items-center justify-between gap-2 hover:bg-[#35363a] ${
+                          active ? 'bg-[#303134] text-[#8ab4f8]' : 'text-[#e8eaed]'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setWsMenuOpen(false);
+                            onSelectWorkspace(ws.id);
+                          }}
+                          className="flex-1 text-left truncate font-mono text-[11px]"
+                        >
+                          {ws.name}.ipynb
+                        </button>
+                        {workspaces.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteWorkspace(ws.id);
+                            }}
+                            title="Xóa notebook này"
+                            className="p-0.5 text-[#9aa0a6] hover:text-[#f28b82]"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -261,8 +351,18 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         </div>
       </div>
 
-      {/* Right: Panel Toggles, Runtime Selector & Resource Pill */}
+      {/* Right: AI BYOK, Panel Toggles, Runtime Selector & Resource Pill */}
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenAiModal}
+          title="AI Copilot (BYOK - dùng Gemini hoặc OpenAI Key của bạn để Auto-Optimize & sinh code)"
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-[#303134] hover:bg-[#3c4043] text-[#8ab4f8] border border-[#8ab4f8]/40 transition-colors cursor-pointer"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>AI Copilot (BYOK)</span>
+        </button>
+
         <div className="flex items-center bg-[#18191a] p-0.5 rounded border border-[#3c4043]">
           <button
             type="button"

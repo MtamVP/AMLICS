@@ -91,6 +91,15 @@ export interface PipelineConfig {
   tuningStrategy: TuningStrategy;
   tuningIterations: number;
   hyperparameters: HyperparameterConfig;
+
+  // Danh sách các trường đã được Auto-Optimize / AI BYOK tự động chọn (hiển thị nhãn [Auto])
+  autoSelectedFields?: string[];
+}
+
+export interface NotebookWorkspaceMeta {
+  id: string;
+  name: string;
+  updatedAt: number;
 }
 
 export interface ColumnProfile {
