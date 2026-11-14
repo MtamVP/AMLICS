@@ -7,6 +7,7 @@ import { CloudConnectModal } from './components/CloudConnectModal';
 import {
   createDefaultPipelineConfig,
   PUBLIC_URL_PRESETS,
+  PublicDatasetPreset,
 } from './data/sampleDatasets';
 import {
   buildAllPipelineCells,
@@ -129,6 +130,7 @@ export function App() {
   const ipynbInputRef = useRef<HTMLInputElement | null>(null);
   const lastProfileDatasetRef = useRef<string>('');
   const workspaceHydratedRef = useRef<boolean>(false);
+  const pendingPresetRef = useRef<PublicDatasetPreset | null>(null);
 
   const configRef = useRef(config);
   configRef.current = config;
@@ -270,23 +272,29 @@ export function App() {
           return prev;
         }
 
-        // Choose the last non-ID column as Target by default
+        const activePreset = pendingPresetRef.current;
+        pendingPresetRef.current = null;
+
+        // Choose the preset targetColumn if available, otherwise the last non-ID column
         const nonIdCols = profile.columns.filter(
           (c) => !c.is_id_like && !c.is_constant
         );
         const targetCand =
-          nonIdCols[nonIdCols.length - 1]?.name ||
-          profile.columns[profile.columns.length - 1]?.name ||
-          prev.targetColumn;
+          activePreset && allColNames.includes(activePreset.targetColumn)
+            ? activePreset.targetColumn
+            : nonIdCols[nonIdCols.length - 1]?.name ||
+              profile.columns[profile.columns.length - 1]?.name ||
+              prev.targetColumn;
 
         const targetMeta = profile.columns.find((c) => c.name === targetCand);
-        const inferredTask =
-          targetMeta && targetMeta.nunique <= 12
-            ? 'classification'
-            : 'regression';
+        const inferredTask = activePreset
+          ? activePreset.taskType
+          : targetMeta && targetMeta.nunique <= 12
+          ? 'classification'
+          : 'regression';
 
         // Automatically drop all ID columns, constant columns, and high-cardinality text columns!
-        const dropCols = profile.columns
+        const autoDropCols = profile.columns
           .filter(
             (c) =>
               c.name !== targetCand &&
@@ -296,9 +304,17 @@ export function App() {
                 c.inferred_type === 'text')
           )
           .map((c) => c.name);
+        const dropCols = Array.from(
+          new Set([
+            ...autoDropCols,
+            ...(activePreset ? activePreset.dropColumns.filter((c) => c !== targetCand && allColNames.includes(c)) : []),
+          ])
+        );
 
         const firstIdCol =
-          profile.columns.find((c) => c.is_id_like)?.name ||
+          (activePreset?.idColumn && allColNames.includes(activePreset.idColumn)
+            ? activePreset.idColumn
+            : profile.columns.find((c) => c.is_id_like)?.name) ||
           profile.columns[0]?.name ||
           'id';
 
@@ -1079,6 +1095,9 @@ ${metricLines}`;
         );
       }
 
+      const preset = PUBLIC_URL_PRESETS.find((p) => p.id === presetId);
+      pendingPresetRef.current = preset || null;
+
       await saveCsvFileToCache('train', filename, csvText);
 
       pyodideWorkerRef.current?.postMessage({
@@ -1091,7 +1110,6 @@ ${metricLines}`;
         },
       });
 
-      const preset = PUBLIC_URL_PRESETS.find((p) => p.id === presetId);
       setConfig((prev) => ({
         ...prev,
         datasetSource: 'public_url',

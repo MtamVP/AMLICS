@@ -232,11 +232,17 @@ categorical_transformer = Pipeline(steps=[
     ('encoder', ${catEncoderCode})
 ])
 
+transformers_list = []
+if numeric_features:
+    transformers_list.append(('num', numeric_transformer, numeric_features))
+if categorical_features:
+    transformers_list.append(('cat', categorical_transformer, categorical_features))
+
+if not transformers_list:
+    raise ValueError("Cần ít nhất 1 cột 'num' hoặc 'cat' làm biến đầu vào (Features) để huấn luyện.")
+
 preprocessor = ColumnTransformer(
-    transformers=[
-        ('num', numeric_transformer, numeric_features),
-        ('cat', categorical_transformer, categorical_features)
-    ],
+    transformers=transformers_list,
     remainder='drop',
     verbose_feature_names_out=True
 )
