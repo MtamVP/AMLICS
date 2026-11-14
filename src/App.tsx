@@ -1661,6 +1661,13 @@ ${metricLines}`;
               w.id === activeWorkspaceId ? { ...w, trainDatasetUrl: finalUrl } : w
             )
           );
+          const ws = workspacesRef.current.find((w) => w.id === activeWorkspaceId);
+          if (ws) {
+            void pushNotebookToSupabase(supabaseCreds, syncKey, {
+              ...ws,
+              trainDatasetUrl: finalUrl,
+            });
+          }
         }
       });
     }
@@ -1726,6 +1733,13 @@ ${metricLines}`;
               w.id === activeWorkspaceId ? { ...w, testDatasetUrl: syncUrl } : w
             )
           );
+          const ws = workspacesRef.current.find((w) => w.id === activeWorkspaceId);
+          if (ws) {
+            void pushNotebookToSupabase(supabaseCreds, syncKey, {
+              ...ws,
+              testDatasetUrl: syncUrl,
+            });
+          }
         }
       });
     }
@@ -2040,6 +2054,8 @@ ${metricLines}`;
     []
   );
 
+  const pushAllToCloudRef = useRef<(() => Promise<void>) | null>(null);
+
   const handlePullAllFromCloud = useCallback(
     async (overrideSyncKey?: string, forceApply = true) => {
       const keyToUse = overrideSyncKey || syncKey;
@@ -2114,6 +2130,10 @@ ${metricLines}`;
             void restoreCsvsForWorkspaceFromUrls(targetWs);
           }
         }
+      } else if (!forceApply) {
+        // Brand-new empty sync_key on Supabase: seed cloud immediately from current local state
+        void pushAllToCloudRef.current?.();
+        return;
       }
 
       setSyncStatus('synced');
@@ -2197,6 +2217,8 @@ ${metricLines}`;
     selectedExpId,
     runtimeMode,
   ]);
+
+  pushAllToCloudRef.current = handlePushAllToCloud;
 
   // Initial pull from Supabase once hydrated
   useEffect(() => {
