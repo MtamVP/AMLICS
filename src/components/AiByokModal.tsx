@@ -48,13 +48,13 @@ interface AiTaskPreset {
 const AI_TASK_PRESETS: AiTaskPreset[] = [
   {
     id: 'auto_optimize',
-    label: '✨ AI Auto-Optimize Toàn Bộ Pipeline',
+    label: '[Auto] AI Auto-Optimize Toàn Bộ Pipeline',
     description:
       'Tự chọn Model, CV Strategy, Preprocessing & Hyperparameters tối ưu nhất cho dataset hiện tại + gắn nhãn [Auto].',
   },
   {
     id: 'complete_pipeline_code',
-    label: '💻 Viết Code Python Hoàn Thiện (End-to-End Clean Code)',
+    label: '[Code] Viết Code Python Hoàn Thiện (End-to-End Clean Code)',
     description:
       'Sinh 1 cell Python hoàn chỉnh, sạch đẹp, có comment tiếng Việt giải thích từng bước từ tiền xử lý đến đánh giá & lưu submission.',
     prompt:
@@ -62,7 +62,7 @@ const AI_TASK_PRESETS: AiTaskPreset[] = [
   },
   {
     id: 'refactor_active_cell',
-    label: '🛠️ Hoàn thiện, Tối ưu & Chú thích lại Cell đang chọn',
+    label: '[Refactor] Hoàn thiện, Tối ưu & Chú thích lại Cell đang chọn',
     description:
       'Đọc code của cell bạn đang chọn trong Notebook, sửa lỗi tiềm ẩn, tối ưu tốc độ và thêm chú thích học tập dễ hiểu.',
     prompt:
@@ -70,7 +70,7 @@ const AI_TASK_PRESETS: AiTaskPreset[] = [
   },
   {
     id: 'feature_engineering',
-    label: '🧬 + Feature Engineering Cell (Tạo đặc trưng mới)',
+    label: '[Feature] + Feature Engineering Cell (Tạo đặc trưng mới)',
     description:
       'Sinh cell Python tạo 4-6 biến tương tác, tỷ lệ hoặc biến thời gian mới dựa trên schema cột thật, không rò rỉ Target.',
     prompt:
@@ -78,7 +78,7 @@ const AI_TASK_PRESETS: AiTaskPreset[] = [
   },
   {
     id: 'deep_eda_charts',
-    label: '📊 + Deep EDA & Visualization Cell (Biểu đồ chuyên sâu)',
+    label: '[EDA] + Deep EDA & Visualization Cell (Biểu đồ chuyên sâu)',
     description:
       'Sinh cell vẽ 3-4 biểu đồ phân tích phân phối, ngoại lai, tương quan với Target phù hợp đúng các cột hiện có.',
     prompt:
@@ -86,7 +86,7 @@ const AI_TASK_PRESETS: AiTaskPreset[] = [
   },
   {
     id: 'ensemble_blending',
-    label: '🏆 + Ensemble / Stacking (Kết hợp nhiều Model tăng điểm)',
+    label: '[Ensemble] + Ensemble / Stacking (Kết hợp nhiều Model tăng điểm)',
     description:
       'Viết code Voting / Stacking kết hợp HistGradientBoosting, RandomForest, ExtraTrees và Linear/Ridge để tăng điểm CV & Holdout.',
     prompt:
@@ -94,7 +94,7 @@ const AI_TASK_PRESETS: AiTaskPreset[] = [
   },
   {
     id: 'hyperparam_tuning_code',
-    label: '🎛️ + Hyperparameter Search Chuyên sâu (RandomizedSearchCV)',
+    label: '[Tuning] + Hyperparameter Search Chuyên sâu (RandomizedSearchCV)',
     description:
       'Sinh cell tìm kiếm bộ siêu tham số tối ưu với không gian tìm kiếm thông minh và in ra Top 5 cấu hình tốt nhất.',
     prompt:
@@ -102,13 +102,13 @@ const AI_TASK_PRESETS: AiTaskPreset[] = [
   },
   {
     id: 'diagnose_fix',
-    label: '🔧 Chẩn đoán Lỗi & Audit Pipeline (Leakage / Outlier / Bug)',
+    label: '[Debug] Chẩn đoán Lỗi & Audit Pipeline (Leakage / Outlier / Bug)',
     description:
       'Đọc traceback lỗi gần nhất (nếu có) và viết code khắc phục, hoặc kiểm tra rò rỉ dữ liệu & các điểm làm tụt điểm CV.',
   },
   {
     id: 'explain_results',
-    label: '🎓 Phân tích Điểm số & Kế hoạch Tăng điểm (Coach ML)',
+    label: '[Coach] Phân tích Điểm số & Kế hoạch Tăng điểm (Coach ML)',
     description:
       'Phân tích kết quả các lần chạy trên Leaderboard (Overfit/Underfit) và sinh cell kiểm chứng bước cải thiện tiếp theo.',
     prompt:
@@ -116,7 +116,7 @@ const AI_TASK_PRESETS: AiTaskPreset[] = [
   },
   {
     id: 'markdown_report',
-    label: '📝 Sinh Báo cáo Tổng kết Thí nghiệm (Report Printer)',
+    label: '[Report] Sinh Báo cáo Tổng kết Thí nghiệm (Report Printer)',
     description:
       'Tạo cell tổng hợp bài toán, dữ liệu, bảng kết quả mô hình, nhận xét ưu/nhược điểm sẵn sàng copy vào báo cáo.',
     prompt:
