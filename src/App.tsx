@@ -1005,22 +1005,54 @@ export function App() {
     appendCliLog('system', `[Tournament] Bắt đầu so sánh ${models.length} mô hình: ${models.join(', ')}...`);
 
     try {
-      // Ensure prerequisite steps (data_load, preprocess, split_cv) succeeded
-      const prereqSteps = ['data_load', 'preprocess', 'split_cv'];
-      for (const step of prereqSteps) {
-        if (stopRequestedRef.current) break;
-        const c = cellsRef.current.find((cell) => cell.stepType === step);
-        if (c && c.status !== 'success') {
-          const ok = await executeSingleCell(c.id);
-          if (!ok || stopRequestedRef.current) return;
+      const trainIdx = cellsRef.current.findIndex((c) => c.stepType === 'model_train');
+      const evalCellCheck = cellsRef.current.find((c) => c.stepType === 'evaluate');
+      if (trainIdx < 0 || !evalCellCheck) {
+        appendCliLog(
+          'stderr',
+          '[Tournament] Không tìm thấy cell Huấn luyện (model_train) hoặc Đánh giá (evaluate). Hãy chọn một Mẫu Pipeline trước.'
+        );
+        return;
+      }
+
+      // Check actual Python kernel memory (after page reload or kernel restart,
+      // cell.status may still be 'success' from IndexedDB cache even though RAM is empty).
+      const hasKernelState =
+        namespaceVars.includes('X_train') &&
+        namespaceVars.includes('y_train') &&
+        namespaceVars.includes('preprocessor');
+
+      if (!hasKernelState) {
+        appendCliLog(
+          'system',
+          '[Tournament] Kernel chưa có dữ liệu trong RAM (vừa tải lại trang/restart). Tự động chạy các cell chuẩn bị từ đầu trước...'
+        );
+        for (let i = 0; i < trainIdx; i++) {
+          if (stopRequestedRef.current) break;
+          const c = cellsRef.current[i];
+          if (c && c.cellType === 'code') {
+            const ok = await executeSingleCell(c.id);
+            if (!ok || stopRequestedRef.current) return;
+          }
+        }
+      } else {
+        // Kernel already has X_train/y_train; still ensure any modified/unrun prereq steps succeeded
+        const prereqSteps = ['data_load', 'preprocess', 'split_cv'];
+        for (const step of prereqSteps) {
+          if (stopRequestedRef.current) break;
+          const c = cellsRef.current.find((cell) => cell.stepType === step);
+          if (c && c.status !== 'success') {
+            const ok = await executeSingleCell(c.id);
+            if (!ok || stopRequestedRef.current) return;
+          }
         }
       }
 
       for (const model of models) {
         if (stopRequestedRef.current) break;
         appendCliLog('system', `[Tournament] Đang huấn luyện ${model}...`);
-        configProvenanceRef.current = 'ai_copilot';
-    setConfig((prev) => ({
+        configProvenanceRef.current = 'tournament';
+        setConfig((prev) => ({
           ...prev,
           modelFamily: model,
           autoSelectedFields: (prev.autoSelectedFields || []).filter((f) => f !== 'modelFamily'),
@@ -1044,7 +1076,7 @@ export function App() {
       setIsTournamentRunning(false);
       setIsPipelineRunning(false);
     }
-  }, [runningCellId, isPipelineRunning, isTournamentRunning, appendCliLog, executeSingleCell]);
+  }, [runningCellId, isPipelineRunning, isTournamentRunning, namespaceVars, appendCliLog, executeSingleCell]);
 
   const handleApplyQuickFix = useCallback(
     (kind: 'regularize' | 'balance' | 'boost') => {
