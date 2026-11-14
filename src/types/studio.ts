@@ -14,19 +14,25 @@ export type StepType =
   | 'custom'
   | 'markdown_doc';
 
-export type NumericImputerStrategy = 'median' | 'mean' | 'most_frequent' | 'constant_zero';
-export type NumericScalerStrategy = 'standard' | 'robust' | 'minmax' | 'none';
+export type NumericImputerStrategy = 'median' | 'mean' | 'most_frequent' | 'constant_zero' | 'knn';
+export type NumericScalerStrategy = 'standard' | 'robust' | 'minmax' | 'quantile_normal' | 'power_yeojohnson' | 'none';
 export type CategoricalImputerStrategy = 'most_frequent' | 'constant_missing';
-export type CategoricalEncoderStrategy = 'onehot' | 'ordinal';
-export type ImbalanceStrategy = 'none' | 'class_weight' | 'random_oversample';
-export type CVStrategy = 'stratified_kfold' | 'kfold' | 'group_kfold' | 'timeseries_split';
-export type TuningStrategy = 'none' | 'randomized_search';
+export type CategoricalEncoderStrategy = 'onehot' | 'ordinal' | 'target';
+export type FeatureSelectionStrategy = 'none' | 'select_k_best_10' | 'select_k_best_20' | 'select_from_model';
+export type ImbalanceStrategy = 'none' | 'class_weight' | 'random_oversample' | 'random_undersample';
+export type CVStrategy = 'stratified_kfold' | 'kfold' | 'repeated_stratified_kfold' | 'group_kfold' | 'timeseries_split';
+export type TuningStrategy = 'none' | 'randomized_search' | 'grid_search';
+export type ScoringMetricStrategy = 'auto' | 'roc_auc' | 'f1_weighted' | 'accuracy' | 'rmse' | 'mae' | 'r2';
 
 export type ModelFamily =
   | 'HistGradientBoosting'
+  | 'GradientBoosting'
   | 'RandomForest'
   | 'ExtraTrees'
+  | 'DecisionTree'
   | 'LinearModel'
+  | 'SVM'
+  | 'KNeighbors'
   | 'MLPNeuralNet'
   | 'LightGBM'
   | 'XGBoost'
@@ -39,6 +45,7 @@ export interface HyperparameterConfig {
   minSamplesLeaf: number;
   l2Regularization: number;
   subsample: number;
+  earlyStopping: boolean;
   randomState: number;
 }
 
@@ -56,11 +63,17 @@ export interface PipelineConfig {
   numericColumns: string[];
   categoricalColumns: string[];
 
+  // Bước 1: Dữ liệu & Schema
+  dropDuplicates: boolean;
+
   // Bước 2: Tiền xử lý & Feature Engineering trong Pipeline (Chống Data Leakage)
   numericImputer: NumericImputerStrategy;
   numericScaler: NumericScalerStrategy;
   addMissingIndicator: boolean;
   logTransformNumeric: boolean;
+  polynomialInteractions: boolean;
+  varianceThreshold: boolean;
+  featureSelection: FeatureSelectionStrategy;
   categoricalImputer: CategoricalImputerStrategy;
   categoricalEncoder: CategoricalEncoderStrategy;
   maxOneHotCategories: number;
@@ -71,6 +84,7 @@ export interface PipelineConfig {
   cvStrategy: CVStrategy;
   groupColumn: string;
   imbalanceStrategy: ImbalanceStrategy;
+  scoringMetric: ScoringMetricStrategy;
 
   // Bước 4: Mô hình, Hyperparameters & Tuning
   modelFamily: ModelFamily;

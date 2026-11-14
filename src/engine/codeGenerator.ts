@@ -70,6 +70,15 @@ if os.path.exists(test_csv_path):
     print(f"Test set: {TEST_DATASET_NAME} ({df_test.shape[0]:,} rows, {df_test.shape[1]} cols)")`
     : '';
 
+  const dropDupBlock = config.dropDuplicates
+    ? `
+# Remove exact duplicate rows to prevent Train/Test leakage
+dup_count = int(df.duplicated().sum())
+if dup_count > 0:
+    print(f"Dropping {dup_count:,} duplicate rows...")
+    df = df.drop_duplicates().reset_index(drop=True)`
+    : '';
+
   const subsampleBlock =
     config.subsampleRows > 0
       ? `
@@ -90,7 +99,7 @@ import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore')
 
-${loadBlock}${testLoadBlock}${subsampleBlock}
+${loadBlock}${testLoadBlock}${dropDupBlock}${subsampleBlock}
 
 print(f"Dataset : {DATASET_NAME} ({df.shape[0]:,} rows, {df.shape[1]} cols)")
 print(f"Target  : '${config.targetColumn.replace(/'/g, "\\'")}' | Task: ${config.taskType}")
@@ -117,12 +126,15 @@ export function generateCell2Preprocess(config: PipelineConfig): string {
       ')',
     most_frequent: "SimpleImputer(strategy='most_frequent')",
     constant_zero: "SimpleImputer(strategy='constant', fill_value=0)",
+    knn: 'KNNImputer(n_neighbors=5)',
   };
 
   const numScalerMap: Record<string, string> = {
     standard: 'StandardScaler()',
     robust: 'RobustScaler()',
     minmax: 'MinMaxScaler()',
+    quantile_normal: `QuantileTransformer(output_distribution='normal', random_state=${config.hyperparameters.randomState})`,
+    power_yeojohnson: "PowerTransformer(method='yeo-johnson')",
     none: "'passthrough'",
   };
 
@@ -131,23 +143,53 @@ export function generateCell2Preprocess(config: PipelineConfig): string {
     constant_missing: "SimpleImputer(strategy='constant', fill_value='Missing')",
   };
 
-  const catEncoderCode =
-    config.categoricalEncoder === 'onehot'
-      ? `OneHotEncoder(handle_unknown='ignore', sparse_output=False, max_categories=${config.maxOneHotCategories})`
-      : `OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)`;
+  let catEncoderCode = '';
+  if (config.categoricalEncoder === 'onehot') {
+    catEncoderCode = `OneHotEncoder(handle_unknown='ignore', sparse_output=False, max_categories=${config.maxOneHotCategories})`;
+  } else if (config.categoricalEncoder === 'target') {
+    catEncoderCode = `TargetEncoder(random_state=${config.hyperparameters.randomState})`;
+  } else {
+    catEncoderCode = `OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)`;
+  }
 
   const logStepCode = config.logTransformNumeric
     ? `\n    ('log_transform', FunctionTransformer(lambda x: np.sign(x) * np.log1p(np.abs(np.nan_to_num(x, nan=0.0))))),`
     : '';
 
+  const polyStepCode = config.polynomialInteractions
+    ? `\n    ('poly_interactions', PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)),`
+    : '';
+
+  const extraStepsList: string[] = [];
+  if (config.varianceThreshold) {
+    extraStepsList.push("('var_thresh', VarianceThreshold(threshold=0.0))");
+  }
+  if (config.featureSelection === 'select_k_best_10') {
+    const scoreFn = config.taskType === 'classification' ? 'f_classif' : 'f_regression';
+    extraStepsList.push(`('feat_select', SelectKBest(score_func=${scoreFn}, k=10))`);
+  } else if (config.featureSelection === 'select_k_best_20') {
+    const scoreFn = config.taskType === 'classification' ? 'f_classif' : 'f_regression';
+    extraStepsList.push(`('feat_select', SelectKBest(score_func=${scoreFn}, k=20))`);
+  } else if (config.featureSelection === 'select_from_model') {
+    const sfEst =
+      config.taskType === 'classification'
+        ? `RandomForestClassifier(n_estimators=50, max_depth=6, random_state=${config.hyperparameters.randomState})`
+        : `RandomForestRegressor(n_estimators=50, max_depth=6, random_state=${config.hyperparameters.randomState})`;
+    extraStepsList.push(`('feat_select', SelectFromModel(${sfEst}))`);
+  }
+
   return `# [2] Anti-Leakage Preprocessing (ColumnTransformer)
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
+from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.preprocessing import (
     StandardScaler, RobustScaler, MinMaxScaler,
-    OneHotEncoder, OrdinalEncoder, FunctionTransformer
+    QuantileTransformer, PowerTransformer,
+    OneHotEncoder, OrdinalEncoder, TargetEncoder,
+    FunctionTransformer, PolynomialFeatures
 )
+from sklearn.feature_selection import VarianceThreshold, SelectKBest, SelectFromModel, f_classif, f_regression
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
 TARGET_COL = '${config.targetColumn.replace(/'/g, "\\'")}'
 DROP_COLS = ${formatPyList(config.dropColumns)}
@@ -181,7 +223,7 @@ if not numeric_features and not categorical_features:
             DROP_COLS.append(c)
 
 numeric_transformer = Pipeline(steps=[
-    ('imputer', ${numImputerMap[config.numericImputer]}),${logStepCode}
+    ('imputer', ${numImputerMap[config.numericImputer]}),${logStepCode}${polyStepCode}
     ('scaler', ${numScalerMap[config.numericScaler]})
 ])
 
@@ -199,9 +241,13 @@ preprocessor = ColumnTransformer(
     verbose_feature_names_out=True
 )
 
+pipeline_extra_steps = [${extraStepsList.join(', ')}]
+
 print(f"ColumnTransformer configured:")
 print(f"  Numeric ({len(numeric_features)})     : {numeric_features}")
 print(f"  Categorical ({len(categorical_features)}) : {categorical_features}")
+if pipeline_extra_steps:
+    print(f"  Extra Steps ({len(pipeline_extra_steps)}) : {[s[0] for s in pipeline_extra_steps]}")
 if DROP_COLS:
     print(f"  Dropped ({len(DROP_COLS)})     : {DROP_COLS}")
 `;
@@ -211,7 +257,9 @@ export function generateCell3SplitCV(config: PipelineConfig): string {
   const isClass = config.taskType === 'classification';
   const isTimeSeries = config.cvStrategy === 'timeseries_split';
   const isGroup = config.cvStrategy === 'group_kfold';
-  const isStratified = isClass && config.cvStrategy === 'stratified_kfold';
+  const isRepeated = isClass && config.cvStrategy === 'repeated_stratified_kfold';
+  const isStratified =
+    isClass && (config.cvStrategy === 'stratified_kfold' || isRepeated);
 
   const stratifyExpr = isStratified && !isTimeSeries ? 'y' : 'None';
   const shuffleSplit = isTimeSeries ? 'False' : 'True';
@@ -224,6 +272,9 @@ cv_splitter = TimeSeriesSplit(n_splits=${config.cvFolds})`;
     cvInitCode = `from sklearn.model_selection import GroupKFold
 cv_splitter = GroupKFold(n_splits=${config.cvFolds})
 GROUP_COL = '${(config.groupColumn || '').replace(/'/g, "\\'")}'`;
+  } else if (isRepeated) {
+    cvInitCode = `from sklearn.model_selection import RepeatedStratifiedKFold
+cv_splitter = RepeatedStratifiedKFold(n_splits=${config.cvFolds}, n_repeats=2, random_state=${config.hyperparameters.randomState})`;
   } else if (isStratified) {
     cvInitCode = `from sklearn.model_selection import StratifiedKFold
 cv_splitter = StratifiedKFold(n_splits=${config.cvFolds}, shuffle=True, random_state=${config.hyperparameters.randomState})`;
@@ -283,7 +334,7 @@ estimator = HistGradientBoostingClassifier(
     min_samples_leaf=${hp.minSamplesLeaf},
     l2_regularization=${hp.l2Regularization},
     class_weight=${useBalancedWeight ? "'balanced'" : 'None'},
-    early_stopping=True,
+    early_stopping=${hp.earlyStopping ? 'True' : 'False'},
     random_state=${hp.randomState}
 )
 ACTIVE_MODEL_NAME = "HistGradientBoosting"`
@@ -294,10 +345,86 @@ estimator = HistGradientBoostingRegressor(
     max_depth=${hp.maxDepth},
     min_samples_leaf=${hp.minSamplesLeaf},
     l2_regularization=${hp.l2Regularization},
-    early_stopping=True,
+    early_stopping=${hp.earlyStopping ? 'True' : 'False'},
     random_state=${hp.randomState}
 )
 ACTIVE_MODEL_NAME = "HistGradientBoosting"`;
+      break;
+
+    case 'GradientBoosting':
+      modelInitBlock = isClass
+        ? `from sklearn.ensemble import GradientBoostingClassifier
+estimator = GradientBoostingClassifier(
+    n_estimators=${hp.nEstimators},
+    learning_rate=${hp.learningRate},
+    max_depth=${Math.min(hp.maxDepth, 8)},
+    min_samples_leaf=${hp.minSamplesLeaf},
+    subsample=${hp.subsample},
+    random_state=${hp.randomState}
+)
+ACTIVE_MODEL_NAME = "GradientBoosting"`
+        : `from sklearn.ensemble import GradientBoostingRegressor
+estimator = GradientBoostingRegressor(
+    n_estimators=${hp.nEstimators},
+    learning_rate=${hp.learningRate},
+    max_depth=${Math.min(hp.maxDepth, 8)},
+    min_samples_leaf=${hp.minSamplesLeaf},
+    subsample=${hp.subsample},
+    random_state=${hp.randomState}
+)
+ACTIVE_MODEL_NAME = "GradientBoosting"`;
+      break;
+
+    case 'DecisionTree':
+      modelInitBlock = isClass
+        ? `from sklearn.tree import DecisionTreeClassifier
+estimator = DecisionTreeClassifier(
+    max_depth=${hp.maxDepth},
+    min_samples_leaf=${hp.minSamplesLeaf},
+    class_weight=${useBalancedWeight ? "'balanced'" : 'None'},
+    random_state=${hp.randomState}
+)
+ACTIVE_MODEL_NAME = "DecisionTree"`
+        : `from sklearn.tree import DecisionTreeRegressor
+estimator = DecisionTreeRegressor(
+    max_depth=${hp.maxDepth},
+    min_samples_leaf=${hp.minSamplesLeaf},
+    random_state=${hp.randomState}
+)
+ACTIVE_MODEL_NAME = "DecisionTree"`;
+      break;
+
+    case 'SVM':
+      modelInitBlock = isClass
+        ? `from sklearn.svm import SVC
+estimator = SVC(
+    C=${(1.0 / Math.max(hp.l2Regularization, 0.05)).toFixed(2)},
+    probability=True,
+    class_weight=${useBalancedWeight ? "'balanced'" : 'None'},
+    random_state=${hp.randomState}
+)
+ACTIVE_MODEL_NAME = "SVM (RBF)"`
+        : `from sklearn.svm import SVR
+estimator = SVR(
+    C=${(1.0 / Math.max(hp.l2Regularization, 0.05)).toFixed(2)}
+)
+ACTIVE_MODEL_NAME = "SVR (RBF)"`;
+      break;
+
+    case 'KNeighbors':
+      modelInitBlock = isClass
+        ? `from sklearn.neighbors import KNeighborsClassifier
+estimator = KNeighborsClassifier(
+    n_neighbors=${Math.max(3, Math.min(25, hp.maxDepth))},
+    weights='distance'
+)
+ACTIVE_MODEL_NAME = "KNeighbors"`
+        : `from sklearn.neighbors import KNeighborsRegressor
+estimator = KNeighborsRegressor(
+    n_neighbors=${Math.max(3, Math.min(25, hp.maxDepth))},
+    weights='distance'
+)
+ACTIVE_MODEL_NAME = "KNeighbors"`;
       break;
 
     case 'RandomForest':
@@ -546,6 +673,18 @@ train_balanced = pd.concat([df_maj, df_min_upsampled]).sample(frac=1.0, random_s
 X_train_fit = train_balanced.drop(columns=['__target__'])
 y_train_fit = train_balanced['__target__']
 print(f"Oversampled train set: {len(X_train)} -> {len(X_train_fit)} rows")`
+      : isClass && config.imbalanceStrategy === 'random_undersample'
+      ? `from sklearn.utils import resample
+train_combined = X_train.copy()
+train_combined['__target__'] = y_train.values
+min_class = train_combined['__target__'].value_counts().idxmin()
+df_min = train_combined[train_combined['__target__'] == min_class]
+df_maj = train_combined[train_combined['__target__'] != min_class]
+df_maj_downsampled = resample(df_maj, replace=False, n_samples=len(df_min), random_state=${hp.randomState})
+train_balanced = pd.concat([df_min, df_maj_downsampled]).sample(frac=1.0, random_state=${hp.randomState})
+X_train_fit = train_balanced.drop(columns=['__target__'])
+y_train_fit = train_balanced['__target__']
+print(f"Undersampled train set: {len(X_train)} -> {len(X_train_fit)} rows")`
       : `X_train_fit, y_train_fit = X_train, y_train`;
 
   const tuningBlock =
@@ -576,6 +715,31 @@ if param_dist:
     print("Best tuned params:", search.best_params_)
 else:
     full_pipeline.fit(X_train_fit, y_train_fit)`
+      : config.tuningStrategy === 'grid_search'
+      ? `
+# Exhaustive Hyperparameter Tuning via GridSearchCV
+from sklearn.model_selection import GridSearchCV
+param_grid = {}
+if hasattr(estimator, 'max_depth'):
+    param_grid['model__max_depth'] = [3, 6, 10]
+if hasattr(estimator, 'learning_rate'):
+    param_grid['model__learning_rate'] = [0.03, 0.08]
+elif hasattr(estimator, 'C'):
+    param_grid['model__C'] = [0.1, 1.0, 5.0]
+
+if param_grid:
+    print("Running GridSearchCV...")
+    search = GridSearchCV(
+        full_pipeline,
+        param_grid=param_grid,
+        cv=3,
+        scoring='${isClass ? 'roc_auc' : 'neg_root_mean_squared_error'}'
+    )
+    search.fit(X_train_fit, y_train_fit)
+    full_pipeline = search.best_estimator_
+    print("Best GridSearch params:", search.best_params_)
+else:
+    full_pipeline.fit(X_train_fit, y_train_fit)`
       : `full_pipeline.fit(X_train_fit, y_train_fit)`;
 
   const splitCallExpr =
@@ -589,10 +753,8 @@ from sklearn.metrics import roc_auc_score, f1_score, root_mean_squared_error, r2
 
 ${modelInitBlock}
 
-full_pipeline = Pipeline(steps=[
-    ('preprocessor', preprocessor),
-    ('model', estimator)
-])
+extra_steps = pipeline_extra_steps if 'pipeline_extra_steps' in globals() else []
+full_pipeline = Pipeline(steps=[('preprocessor', preprocessor)] + extra_steps + [('model', estimator)])
 
 ${oversampleBlock}
 

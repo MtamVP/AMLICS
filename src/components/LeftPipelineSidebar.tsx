@@ -6,12 +6,14 @@ import {
   CategoricalImputerStrategy,
   CVStrategy,
   DataProfile,
+  FeatureSelectionStrategy,
   ImbalanceStrategy,
   ModelFamily,
   NumericImputerStrategy,
   NumericScalerStrategy,
   PipelineConfig,
   RuntimeMode,
+  ScoringMetricStrategy,
   TaskType,
   TuningStrategy,
 } from '../types/studio';
@@ -31,13 +33,17 @@ interface LeftPipelineSidebarProps {
 }
 
 const MODEL_OPTIONS: { id: ModelFamily; label: string }[] = [
-  { id: 'HistGradientBoosting', label: 'HistGradientBoosting' },
-  { id: 'LightGBM', label: 'LightGBM' },
-  { id: 'XGBoost', label: 'XGBoost' },
-  { id: 'CatBoost', label: 'CatBoost' },
-  { id: 'RandomForest', label: 'RandomForest' },
-  { id: 'ExtraTrees', label: 'ExtraTrees' },
+  { id: 'HistGradientBoosting', label: 'HistGradientBoosting (Fast GBDT)' },
+  { id: 'LightGBM', label: 'LightGBM (Leaf-wise GBDT)' },
+  { id: 'XGBoost', label: 'XGBoost (Extreme Gradient Boosting)' },
+  { id: 'CatBoost', label: 'CatBoost (Ordered Boosting)' },
+  { id: 'GradientBoosting', label: 'GradientBoosting (Classic sklearn)' },
+  { id: 'RandomForest', label: 'RandomForest (Bagging Ensemble)' },
+  { id: 'ExtraTrees', label: 'ExtraTrees (Randomized Trees)' },
+  { id: 'DecisionTree', label: 'DecisionTree (CART Baseline)' },
   { id: 'LinearModel', label: 'Logistic / Ridge Regression' },
+  { id: 'SVM', label: 'SVM / SVR (RBF Kernel)' },
+  { id: 'KNeighbors', label: 'K-Nearest Neighbors (KNN)' },
   { id: 'MLPNeuralNet', label: 'MLP Neural Network' },
 ];
 
@@ -452,13 +458,73 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                 </div>
               </div>
 
+              {/* Data Cleaning & Submission ID */}
+              <div className="grid grid-cols-2 gap-2 items-center">
+                <label className="flex items-center gap-1.5 text-[11px] text-[#9aa0a6] hover:text-[#e8eaed] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.dropDuplicates}
+                    onChange={() =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        dropDuplicates: !p.dropDuplicates,
+                      }))
+                    }
+                    className="accent-[#8ab4f8]"
+                  />
+                  <span>Drop duplicate rows</span>
+                </label>
+
+                <div>
+                  <select
+                    value={config.idColumnForSubmission}
+                    onChange={(e) =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        idColumnForSubmission: e.target.value,
+                      }))
+                    }
+                    title="ID column used when exporting submission.csv"
+                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-1.5 py-1 text-[10px] text-[#9aa0a6] font-mono"
+                  >
+                    <option value="">ID col: auto</option>
+                    {columns.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        ID: {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               {/* Feature Role Matrix */}
               <div>
                 <div className="flex items-center justify-between text-[11px] text-[#9aa0a6] mb-1">
                   <span>Features ({Math.max(0, columns.length - 1)})</span>
-                  <span className="font-mono text-[10px]">
-                    num:{config.numericColumns.length} cat:{config.categoricalColumns.length} drop:{config.dropColumns.length}
-                  </span>
+                  <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const highMissing = columns
+                          .filter((c) => c.name !== config.targetColumn && c.missing_pct >= 50)
+                          .map((c) => c.name);
+                        if (highMissing.length === 0) return;
+                        onChangeConfig((p) => ({
+                          ...p,
+                          numericColumns: p.numericColumns.filter((c) => !highMissing.includes(c)),
+                          categoricalColumns: p.categoricalColumns.filter((c) => !highMissing.includes(c)),
+                          dropColumns: Array.from(new Set([...p.dropColumns, ...highMissing])),
+                        }));
+                      }}
+                      className="px-1.5 py-0.5 rounded bg-[#292a2d] hover:bg-[#3c4043] text-[#fdd663]"
+                      title="Drop all columns with >= 50% missing values"
+                    >
+                      Drop &gt;50% NaN
+                    </button>
+                    <span>
+                      n:{config.numericColumns.length} c:{config.categoricalColumns.length} d:{config.dropColumns.length}
+                    </span>
+                  </div>
                 </div>
                 <div className="max-h-48 overflow-y-auto rounded border border-[#3c4043] bg-[#202124] divide-y divide-[#292a2d]">
                   {columns
@@ -586,6 +652,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       <option value="mean">mean</option>
                       <option value="most_frequent">most_frequent</option>
                       <option value="constant_zero">constant (0)</option>
+                      <option value="knn">KNNImputer (k=5)</option>
                     </select>
                   </div>
                   <div>
@@ -605,6 +672,8 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       <option value="robust">RobustScaler</option>
                       <option value="standard">StandardScaler</option>
                       <option value="minmax">MinMaxScaler</option>
+                      <option value="quantile_normal">QuantileTransformer (Normal)</option>
+                      <option value="power_yeojohnson">PowerTransformer (Yeo-Johnson)</option>
                       <option value="none">passthrough</option>
                     </select>
                   </div>
@@ -638,6 +707,21 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     className="accent-[#8ab4f8]"
                   />
                   <span>FunctionTransformer (np.log1p skew fix)</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-xs text-[#9aa0a6] hover:text-[#e8eaed] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.polynomialInteractions}
+                    onChange={() =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        polynomialInteractions: !p.polynomialInteractions,
+                      }))
+                    }
+                    className="accent-[#8ab4f8]"
+                  />
+                  <span>PolynomialFeatures (deg=2 interactions)</span>
                 </label>
               </div>
 
@@ -680,9 +764,67 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     >
                       <option value="onehot">OneHotEncoder</option>
                       <option value="ordinal">OrdinalEncoder</option>
+                      <option value="target">TargetEncoder (CV-safe)</option>
                     </select>
                   </div>
                 </div>
+
+                {config.categoricalEncoder === 'onehot' && (
+                  <div className="flex items-center justify-between text-[11px] pt-0.5">
+                    <span className="text-[#9aa0a6]">max_categories (OneHot)</span>
+                    <select
+                      value={config.maxOneHotCategories}
+                      onChange={(e) =>
+                        onChangeConfig((p) => ({
+                          ...p,
+                          maxOneHotCategories: Number(e.target.value),
+                        }))
+                      }
+                      className="bg-[#202124] border border-[#3c4043] rounded px-1.5 py-0.5 text-[11px] text-[#e8eaed] font-mono"
+                    >
+                      <option value={10}>10</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-2 pt-2 border-t border-[#292a2d]">
+                <span className="text-[11px] font-medium text-[#9aa0a6] block">
+                  Feature Selection (Inside Pipeline)
+                </span>
+                <select
+                  value={config.featureSelection}
+                  onChange={(e) =>
+                    onChangeConfig((p) => ({
+                      ...p,
+                      featureSelection: e.target.value as FeatureSelectionStrategy,
+                    }))
+                  }
+                  className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
+                >
+                  <option value="none">None (Keep all encoded features)</option>
+                  <option value="select_k_best_10">SelectKBest (Top 10 ANOVA/F-test)</option>
+                  <option value="select_k_best_20">SelectKBest (Top 20 ANOVA/F-test)</option>
+                  <option value="select_from_model">SelectFromModel (RandomForest importance)</option>
+                </select>
+
+                <label className="flex items-center gap-2 text-xs text-[#9aa0a6] hover:text-[#e8eaed] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.varianceThreshold}
+                    onChange={() =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        varianceThreshold: !p.varianceThreshold,
+                      }))
+                    }
+                    className="accent-[#8ab4f8]"
+                  />
+                  <span>VarianceThreshold (drop 0-variance)</span>
+                </label>
               </div>
             </div>
           )}
@@ -722,6 +864,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                   className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] font-mono"
                 >
                   <option value="stratified_kfold">StratifiedKFold (Standard Classif.)</option>
+                  <option value="repeated_stratified_kfold">RepeatedStratifiedKFold (2× robust)</option>
                   <option value="kfold">KFold (Standard Regress.)</option>
                   <option value="group_kfold">GroupKFold (Prevent Group Leakage)</option>
                   <option value="timeseries_split">TimeSeriesSplit (Prevent Look-ahead Leakage)</option>
@@ -771,6 +914,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     <option value={3}>3-Fold CV</option>
                     <option value={5}>5-Fold CV</option>
                     <option value={10}>10-Fold CV</option>
+                    <option value={15}>15-Fold CV</option>
                   </select>
                 </div>
 
@@ -788,11 +932,66 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     }
                     className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed]"
                   >
+                    <option value={0.1}>0.10 (10%)</option>
                     <option value={0.15}>0.15 (15%)</option>
                     <option value={0.2}>0.20 (20%)</option>
                     <option value={0.25}>0.25 (25%)</option>
                     <option value={0.3}>0.30 (30%)</option>
+                    <option value={0.4}>0.40 (40%)</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                    Scoring Metric
+                  </label>
+                  <select
+                    value={config.scoringMetric}
+                    onChange={(e) =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        scoringMetric: e.target.value as ScoringMetricStrategy,
+                      }))
+                    }
+                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed] font-mono"
+                  >
+                    <option value="auto">Auto (AUC / RMSE)</option>
+                    {config.taskType === 'classification' ? (
+                      <>
+                        <option value="roc_auc">ROC-AUC</option>
+                        <option value="f1_weighted">F1 Weighted</option>
+                        <option value="accuracy">Accuracy</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="rmse">RMSE</option>
+                        <option value="mae">MAE</option>
+                        <option value="r2">R² Score</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                    random_state (Seed)
+                  </label>
+                  <input
+                    type="number"
+                    value={config.hyperparameters.randomState}
+                    onChange={(e) =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        hyperparameters: {
+                          ...p.hyperparameters,
+                          randomState: Number(e.target.value) || 0,
+                        },
+                      }))
+                    }
+                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed] font-mono"
+                  />
                 </div>
               </div>
 
@@ -813,6 +1012,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                   >
                     <option value="class_weight">class_weight='balanced'</option>
                     <option value="random_oversample">Random Oversample (train fold)</option>
+                    <option value="random_undersample">Random Undersample Majority</option>
                     <option value="none">None</option>
                   </select>
                 </div>
@@ -862,29 +1062,55 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="text-[10px] text-[#9aa0a6] block mb-1">
-                  Hyperparameter Search
-                </label>
-                <select
-                  value={config.tuningStrategy}
-                  onChange={(e) =>
-                    onChangeConfig((p) => ({
-                      ...p,
-                      tuningStrategy: e.target.value as TuningStrategy,
-                    }))
-                  }
-                  className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
-                >
-                  <option value="none">Manual Sliders (Fixed Params)</option>
-                  <option value="randomized_search">RandomizedSearchCV (Auto-Tune)</option>
-                </select>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                    Hyperparameter Search
+                  </label>
+                  <select
+                    value={config.tuningStrategy}
+                    onChange={(e) =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        tuningStrategy: e.target.value as TuningStrategy,
+                      }))
+                    }
+                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
+                  >
+                    <option value="none">Manual (Fixed)</option>
+                    <option value="randomized_search">RandomizedSearchCV</option>
+                    <option value="grid_search">GridSearchCV</option>
+                  </select>
+                </div>
+
+                {config.tuningStrategy === 'randomized_search' && (
+                  <div>
+                    <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                      n_iter (Trials)
+                    </label>
+                    <select
+                      value={config.tuningIterations}
+                      onChange={(e) =>
+                        onChangeConfig((p) => ({
+                          ...p,
+                          tuningIterations: Number(e.target.value),
+                        }))
+                      }
+                      className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed] font-mono"
+                    >
+                      <option value={5}>5 trials</option>
+                      <option value={8}>8 trials</option>
+                      <option value={15}>15 trials</option>
+                      <option value={25}>25 trials</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2.5 pt-1">
                 <div>
                   <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                    <span className="text-[#9aa0a6]">n_estimators</span>
+                    <span className="text-[#9aa0a6]">n_estimators / max_iter</span>
                     <span className="text-[#e8eaed]">
                       {config.hyperparameters.nEstimators}
                     </span>
@@ -945,7 +1171,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     <input
                       type="range"
                       min={2}
-                      max={16}
+                      max={20}
                       step={1}
                       value={config.hyperparameters.maxDepth}
                       onChange={(e) =>
@@ -963,7 +1189,35 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
                   <div>
                     <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                      <span className="text-[#9aa0a6]">l2_reg</span>
+                      <span className="text-[#9aa0a6]">min_samples_leaf</span>
+                      <span className="text-[#e8eaed]">
+                        {config.hyperparameters.minSamplesLeaf}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={50}
+                      step={1}
+                      value={config.hyperparameters.minSamplesLeaf}
+                      onChange={(e) =>
+                        onChangeConfig((p) => ({
+                          ...p,
+                          hyperparameters: {
+                            ...p.hyperparameters,
+                            minSamplesLeaf: Number(e.target.value),
+                          },
+                        }))
+                      }
+                      className="w-full accent-[#8ab4f8] h-1 bg-[#3c4043] rounded cursor-pointer"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <div className="flex justify-between text-[11px] font-mono mb-0.5">
+                      <span className="text-[#9aa0a6]">l2_reg / alpha</span>
                       <span className="text-[#e8eaed]">
                         {config.hyperparameters.l2Regularization}
                       </span>
@@ -986,7 +1240,51 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       className="w-full accent-[#8ab4f8] h-1 bg-[#3c4043] rounded cursor-pointer"
                     />
                   </div>
+
+                  <div>
+                    <div className="flex justify-between text-[11px] font-mono mb-0.5">
+                      <span className="text-[#9aa0a6]">subsample</span>
+                      <span className="text-[#e8eaed]">
+                        {config.hyperparameters.subsample}
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={0.5}
+                      max={1.0}
+                      step={0.05}
+                      value={config.hyperparameters.subsample}
+                      onChange={(e) =>
+                        onChangeConfig((p) => ({
+                          ...p,
+                          hyperparameters: {
+                            ...p.hyperparameters,
+                            subsample: Number(e.target.value),
+                          },
+                        }))
+                      }
+                      className="w-full accent-[#8ab4f8] h-1 bg-[#3c4043] rounded cursor-pointer"
+                    />
+                  </div>
                 </div>
+
+                <label className="flex items-center gap-2 text-xs text-[#9aa0a6] hover:text-[#e8eaed] pt-0.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.hyperparameters.earlyStopping}
+                    onChange={() =>
+                      onChangeConfig((p) => ({
+                        ...p,
+                        hyperparameters: {
+                          ...p.hyperparameters,
+                          earlyStopping: !p.hyperparameters.earlyStopping,
+                        },
+                      }))
+                    }
+                    className="accent-[#8ab4f8]"
+                  />
+                  <span>early_stopping=True (Stop on val plateau)</span>
+                </label>
               </div>
             </div>
           )}

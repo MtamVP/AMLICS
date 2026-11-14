@@ -140,11 +140,15 @@ export function createDefaultPipelineConfig(): PipelineConfig {
     dropColumns: ['id'],
     numericColumns: [],
     categoricalColumns: [],
+    dropDuplicates: false,
 
     numericImputer: 'median',
     numericScaler: 'robust',
     addMissingIndicator: true,
     logTransformNumeric: false,
+    polynomialInteractions: false,
+    varianceThreshold: false,
+    featureSelection: 'none',
     categoricalImputer: 'most_frequent',
     categoricalEncoder: 'onehot',
     maxOneHotCategories: 20,
@@ -154,6 +158,7 @@ export function createDefaultPipelineConfig(): PipelineConfig {
     cvStrategy: 'stratified_kfold',
     groupColumn: '',
     imbalanceStrategy: 'class_weight',
+    scoringMetric: 'auto',
 
     modelFamily: 'HistGradientBoosting',
     tuningStrategy: 'none',
@@ -165,6 +170,7 @@ export function createDefaultPipelineConfig(): PipelineConfig {
       minSamplesLeaf: 15,
       l2Regularization: 1.0,
       subsample: 0.85,
+      earlyStopping: true,
       randomState: 42,
     },
   };
