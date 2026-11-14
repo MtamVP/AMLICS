@@ -40,6 +40,7 @@ interface CenterNotebookPaneProps {
   onMoveCell: (cellId: string, direction: 'up' | 'down') => void;
   onDuplicateCell: (cellId: string) => void;
   onDeleteCell: (cellId: string) => void;
+  onDeleteCells?: (cellIds: string[]) => void;
   onApplyTemplate: (templateId: PipelineTemplateId) => void;
   onInsertQuickSnippet: (snippetId: QuickSnippetId) => void;
   onDropCsvFile?: (file: File) => void;
@@ -62,6 +63,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   onMoveCell,
   onDuplicateCell,
   onDeleteCell,
+  onDeleteCells,
   onApplyTemplate,
   onInsertQuickSnippet,
   onDropCsvFile,
@@ -73,6 +75,9 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
   const [showMinimap, setShowMinimap] = useState<boolean>(true);
   const [hoveredMinimapCellId, setHoveredMinimapCellId] = useState<string | null>(null);
+  const [selectedCellIds, setSelectedCellIds] = useState<string[]>([]);
+  const [anchorCellId, setAnchorCellId] = useState<string | null>(null);
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState<boolean>(false);
   const [scrollProgress, setScrollProgress] = useState<{ topRatio: number; heightRatio: number }>({
     topRatio: 0,
     heightRatio: 0.25,
@@ -114,22 +119,215 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
 
   const [zoomedPlotSrc, setZoomedPlotSrc] = useState<string | null>(null);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && zoomedPlotSrc) {
-        setZoomedPlotSrc(null);
-      }
-      if (e.altKey && e.key === 'Backspace' && activeCellId) {
-        const tag = (document.activeElement?.tagName || '').toLowerCase();
-        if (tag !== 'input' && tag !== 'textarea') {
-          e.preventDefault();
-          onDeleteCell(activeCellId);
+  const handleCellSelect = (cellId: string, e?: React.MouseEvent) => {
+    onSelectCell?.(cellId);
+    const isCtrl = Boolean(e?.ctrlKey || e?.metaKey);
+    const isShift = Boolean(e?.shiftKey);
+
+    if (isShift) {
+      const anchor = anchorCellId || activeCellId || cellId;
+      const idxA = cells.findIndex((c) => c.id === anchor);
+      const idxB = cells.findIndex((c) => c.id === cellId);
+      if (idxA >= 0 && idxB >= 0) {
+        const [start, end] = idxA <= idxB ? [idxA, idxB] : [idxB, idxA];
+        const rangeIds = cells.slice(start, end + 1).map((c) => c.id);
+        if (isCtrl) {
+          setSelectedCellIds((prev) => Array.from(new Set([...prev, ...rangeIds])));
+        } else {
+          setSelectedCellIds(rangeIds);
         }
+        return;
+      }
+    }
+
+    if (isCtrl) {
+      setSelectedCellIds((prev) =>
+        prev.includes(cellId) ? prev.filter((id) => id !== cellId) : [...prev, cellId]
+      );
+      setAnchorCellId(cellId);
+      return;
+    }
+
+    setSelectedCellIds([cellId]);
+    setAnchorCellId(cellId);
+  };
+
+  const deleteSelected = () => {
+    const targets =
+      selectedCellIds.length > 0
+        ? selectedCellIds
+        : activeCellId
+        ? [activeCellId]
+        : [];
+    if (targets.length === 0) return;
+    if (onDeleteCells) {
+      onDeleteCells(targets);
+    } else {
+      targets.forEach((id) => onDeleteCell(id));
+    }
+    setSelectedCellIds([]);
+    setAnchorCellId(null);
+  };
+
+  useEffect(() => {
+    const isEditingText = () => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || el.isContentEditable) {
+        return true;
+      }
+      if (el.closest('.monaco-editor')) return true;
+      return false;
+    };
+
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isShortcutsOpen) {
+          setIsShortcutsOpen(false);
+          return;
+        }
+        if (zoomedPlotSrc) {
+          setZoomedPlotSrc(null);
+          return;
+        }
+        if (selectedCellIds.length > 1) {
+          setSelectedCellIds(activeCellId ? [activeCellId] : []);
+          return;
+        }
+      }
+
+      if ((e.altKey && e.key === '/') || (!isEditingText() && e.key === '?')) {
+        e.preventDefault();
+        setIsShortcutsOpen((p) => !p);
+        return;
+      }
+
+      if (isEditingText()) return;
+
+      const isMod = e.ctrlKey || e.metaKey;
+
+      // Ctrl+A: Select all cells
+      if (isMod && !e.shiftKey && e.key.toLowerCase() === 'a') {
+        if (cells.length > 0) {
+          e.preventDefault();
+          const allIds = cells.map((c) => c.id);
+          setSelectedCellIds(allIds);
+          if (!activeCellId) onSelectCell?.(allIds[0]);
+          if (!anchorCellId) setAnchorCellId(allIds[0]);
+        }
+        return;
+      }
+
+      // Delete / Backspace / Alt+Backspace: Delete selected cell(s)
+      if (e.key === 'Delete' || e.key === 'Backspace' || (e.altKey && e.key === 'Backspace')) {
+        if (selectedCellIds.length > 0 || activeCellId) {
+          e.preventDefault();
+          deleteSelected();
+        }
+        return;
+      }
+
+      const curIdx = activeCellId ? cells.findIndex((c) => c.id === activeCellId) : -1;
+
+      // ArrowUp / ArrowDown, Shift+Arrow, Ctrl+Shift+Arrow
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (cells.length === 0) return;
+        e.preventDefault();
+
+        // Alt+Shift+Arrow: Move active cell up/down
+        if (e.altKey && e.shiftKey && activeCellId) {
+          onMoveCell(activeCellId, e.key === 'ArrowUp' ? 'up' : 'down');
+          return;
+        }
+
+        const dir = e.key === 'ArrowDown' ? 1 : -1;
+        const nextIdx =
+          isMod && e.shiftKey
+            ? dir > 0
+              ? cells.length - 1
+              : 0
+            : curIdx < 0
+            ? 0
+            : Math.min(cells.length - 1, Math.max(0, curIdx + dir));
+        const targetCell = cells[nextIdx];
+        if (!targetCell) return;
+
+        if (e.shiftKey) {
+          const anchor = anchorCellId || activeCellId || targetCell.id;
+          const aIdx = Math.max(0, cells.findIndex((c) => c.id === anchor));
+          const [start, end] = aIdx <= nextIdx ? [aIdx, nextIdx] : [nextIdx, aIdx];
+          setSelectedCellIds(cells.slice(start, end + 1).map((c) => c.id));
+          onSelectCell?.(targetCell.id);
+        } else {
+          setSelectedCellIds([targetCell.id]);
+          setAnchorCellId(targetCell.id);
+          onSelectCell?.(targetCell.id);
+        }
+        cellRefs.current[targetCell.id]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        return;
+      }
+
+      // Shift+Enter: Run active cell and advance
+      if (e.shiftKey && e.key === 'Enter' && activeCellId) {
+        e.preventDefault();
+        onRunCell(activeCellId);
+        if (curIdx >= 0 && curIdx < cells.length - 1) {
+          const next = cells[curIdx + 1];
+          onSelectCell?.(next.id);
+          setSelectedCellIds([next.id]);
+          setAnchorCellId(next.id);
+        }
+        return;
+      }
+
+      // Ctrl+Shift+D: Duplicate active cell
+      if (isMod && e.shiftKey && e.key.toLowerCase() === 'd' && activeCellId) {
+        e.preventDefault();
+        onDuplicateCell(activeCellId);
+        return;
+      }
+
+      // Alt+N: Insert Code cell below | Alt+T: Insert Text cell below
+      if (e.altKey && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        onInsertCellAt(curIdx >= 0 ? curIdx + 1 : cells.length, 'code');
+        return;
+      }
+      if (e.altKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        onInsertCellAt(curIdx >= 0 ? curIdx + 1 : cells.length, 'markdown');
+        return;
+      }
+
+      // Alt+M: Toggle collapse active cell | Alt+C: Toggle collapse all
+      if (e.altKey && e.key.toLowerCase() === 'm' && activeCellId) {
+        e.preventDefault();
+        toggleCollapse(activeCellId);
+        return;
+      }
+      if (e.altKey && e.key.toLowerCase() === 'c') {
+        e.preventDefault();
+        toggleCollapseAll();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [zoomedPlotSrc, activeCellId, onDeleteCell]);
+  }, [
+    zoomedPlotSrc,
+    isShortcutsOpen,
+    activeCellId,
+    anchorCellId,
+    selectedCellIds,
+    cells,
+    onDeleteCell,
+    onDeleteCells,
+    onSelectCell,
+    onMoveCell,
+    onRunCell,
+    onDuplicateCell,
+    onInsertCellAt,
+  ]);
 
   const allCollapsed =
     cells.length > 0 && cells.every((c) => Boolean(collapsedCells[c.id]));
@@ -304,20 +502,53 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
               {allCollapsed ? 'Mở tất cả' : 'Thu gọn tất cả'}
             </button>
           )}
-          {activeCellId && (
-            <button
-              type="button"
-              onClick={() => onDeleteCell(activeCellId)}
-              className="flex items-center gap-1 px-2 py-0.5 rounded font-mono text-[11px] border border-[#f28b82]/40 text-[#f28b82] hover:bg-[#f28b82]/15 transition-colors"
-              title="Xóa cell đang chọn (Alt+Backspace)"
-            >
-              <Trash2 className="w-3 h-3" />
-              <span className="hidden md:inline">Xóa cell</span>
-            </button>
+          {selectedCellIds.length > 1 ? (
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#8ab4f8]/15 border border-[#8ab4f8]/50 text-[11px] font-mono">
+              <span className="text-[#8ab4f8] font-semibold">
+                Đã chọn {selectedCellIds.length} cells
+              </span>
+              <button
+                type="button"
+                onClick={deleteSelected}
+                className="flex items-center gap-1 px-1.5 py-0.2 rounded bg-[#f28b82]/20 hover:bg-[#f28b82]/30 text-[#f28b82]"
+                title="Xóa tất cả các cell đã chọn (Delete / Backspace)"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span>Xóa {selectedCellIds.length}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedCellIds(activeCellId ? [activeCellId] : [])}
+                className="text-[#9aa0a6] hover:text-[#e8eaed]"
+                title="Bỏ chọn nhiều (Esc)"
+              >
+                Esc
+              </button>
+            </div>
+          ) : (
+            activeCellId && (
+              <button
+                type="button"
+                onClick={deleteSelected}
+                className="flex items-center gap-1 px-2 py-0.5 rounded font-mono text-[11px] border border-[#f28b82]/40 text-[#f28b82] hover:bg-[#f28b82]/15 transition-colors"
+                title="Xóa cell đang chọn (Delete / Alt+Backspace)"
+              >
+                <Trash2 className="w-3 h-3" />
+                <span className="hidden md:inline">Xóa cell</span>
+              </button>
+            )
           )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsShortcutsOpen(true)}
+            className="px-2 py-0.5 rounded font-mono text-[11px] border border-[#3c4043] text-[#9aa0a6] hover:text-[#e8eaed] hover:bg-[#292a2d] transition-colors"
+            title="Xem danh sách phím tắt (? hoặc Alt+/)"
+          >
+            ⌨ Phím tắt
+          </button>
           {cells.length > 0 && (
             <button
               type="button"
@@ -380,6 +611,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
           const editorHeight = Math.min(Math.max(lineCount * 19 + 20, 85), 520);
           const isMdEditing = Boolean(editingMarkdownIds[cell.id]);
           const isEditingTitle = editingTitleCellId === cell.id;
+          const isMultiSelected = selectedCellIds.includes(cell.id);
 
           if (cell.cellType === 'markdown') {
             return (
@@ -388,8 +620,13 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                   ref={(el) => {
                     cellRefs.current[cell.id] = el;
                   }}
+                  onClick={(e) => handleCellSelect(cell.id, e)}
                   onDoubleClick={() => toggleMarkdownEdit(cell.id, true)}
-                  className="rounded border border-[#3c4043] hover:border-[#5f6368] bg-[#202124] overflow-hidden transition-colors"
+                  className={`rounded border overflow-hidden transition-colors ${
+                    isMultiSelected
+                      ? 'border-[#8ab4f8] bg-[#8ab4f8]/[0.04]'
+                      : 'border-[#3c4043] hover:border-[#5f6368] bg-[#202124]'
+                  }`}
                 >
                   {/* Markdown Cell Header */}
                   <div className="px-3 py-1 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between gap-2 text-[11px]">
@@ -506,14 +743,14 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                 ref={(el) => {
                   cellRefs.current[cell.id] = el;
                 }}
-                onClick={() => onSelectCell?.(cell.id)}
+                onClick={(e) => handleCellSelect(cell.id, e)}
                 className={`rounded border transition-colors overflow-hidden bg-[#202124] ${
                   isRunning
                     ? 'border-[#8ab4f8]'
                     : cell.status === 'error'
                     ? 'border-[#f28b82]/60'
-                    : activeCellId === cell.id
-                    ? 'border-[#5f6368] border-l-2 border-l-[#8ab4f8]'
+                    : isMultiSelected || activeCellId === cell.id
+                    ? 'border-[#8ab4f8] border-l-2 border-l-[#8ab4f8]'
                     : 'border-[#3c4043] hover:border-[#5f6368]'
                 }`}
               >
@@ -818,7 +1055,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
             const isErr = cell.status === 'error';
             const isRun = runningCellId === cell.id || cell.status === 'running';
             const isOk = cell.status === 'success';
-            const isActive = activeCellId === cell.id;
+            const isActive = activeCellId === cell.id || selectedCellIds.includes(cell.id);
             const previewLines = Math.min(6, Math.max(2, Math.ceil(lines.length / 8)));
             return (
               <div
@@ -915,6 +1152,65 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                 alt="Zoomed output plot"
                 className="max-w-full max-h-[80vh] object-contain"
               />
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Keyboard Shortcuts Cheat Sheet Modal */}
+      {isShortcutsOpen && (
+        <div
+          onClick={() => setIsShortcutsOpen(false)}
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg bg-[#202124] border border-[#3c4043] rounded-lg shadow-2xl overflow-hidden text-[#e8eaed]"
+          >
+            <div className="px-4 py-3 bg-[#292a2d] border-b border-[#3c4043] flex items-center justify-between">
+              <span className="text-xs font-semibold font-mono text-[#8ab4f8]">
+                ⌨ Phím tắt Notebook (Shortcuts)
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsShortcutsOpen(false)}
+                className="p-1 rounded text-[#9aa0a6] hover:text-[#e8eaed] hover:bg-[#3c4043]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="p-4 space-y-2 text-xs font-mono max-h-[70vh] overflow-y-auto custom-scrollbar">
+              {[
+                ['Ctrl + A', 'Chọn tất cả các cell'],
+                ['Shift + Click', 'Chọn liên tiếp từ cell gốc đến cell vừa bấm'],
+                ['Ctrl + Click', 'Chọn thêm / bỏ chọn từng cell riêng lẻ'],
+                ['Ctrl + Shift + Click', 'Chọn thêm cả một khoảng cell vào vùng đang chọn'],
+                ['Shift + ↑ / ↓', 'Mở rộng vùng chọn lên / xuống 1 cell'],
+                ['Ctrl + Shift + ↑ / ↓', 'Chọn từ cell hiện tại tới đầu / cuối Notebook'],
+                ['↑ / ↓', 'Di chuyển nhanh giữa các cell'],
+                ['Delete / Backspace', 'Xóa tất cả các cell đang chọn'],
+                ['Shift + Enter', 'Chạy cell đang chọn & nhảy xuống cell tiếp theo'],
+                ['Alt + Shift + ↑ / ↓', 'Di chuyển cell đang chọn lên / xuống'],
+                ['Ctrl + Shift + D', 'Nhân bản (Duplicate) cell đang chọn'],
+                ['Alt + N / Alt + T', 'Thêm cell Code / Markdown ngay bên dưới'],
+                ['Alt + M / Alt + C', 'Thu gọn cell đang chọn / Thu gọn tất cả'],
+                ['Esc', 'Bỏ chọn nhiều cell / Đóng cửa sổ phóng to'],
+                ['? hoặc Alt + /', 'Mở / Đóng bảng phím tắt này'],
+              ].map(([keys, desc]) => (
+                <div
+                  key={keys}
+                  className="flex items-center justify-between gap-3 py-1 border-b border-[#292a2d]"
+                >
+                  <kbd className="px-2 py-0.5 rounded bg-[#18191a] border border-[#3c4043] text-[#fdd663] shrink-0 text-[11px]">
+                    {keys}
+                  </kbd>
+                  <span className="text-[#e8eaed] text-right text-[11px] font-sans">
+                    {desc}
+                  </span>
+                </div>
+              ))}
+              <p className="text-[10px] text-[#9aa0a6] font-sans pt-1">
+                Lưu ý: Các phím tắt thao tác cell (như Ctrl+A, Delete, ↑/↓) tự động nhường cho trình soạn thảo khi bạn đang gõ code bên trong ô Monaco Editor.
+              </p>
             </div>
           </div>
         </div>

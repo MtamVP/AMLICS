@@ -1206,6 +1206,18 @@ export function App() {
     );
   };
 
+  const handleDeleteCells = (cellIds: string[]) => {
+    const idSet = new Set(cellIds);
+    setCells((prev) =>
+      prev
+        .filter((c) => !idSet.has(c.id))
+        .map((c, i) => ({ ...c, order: i + 1 }))
+    );
+    if (activeCellId && idSet.has(activeCellId)) {
+      setActiveCellId(null);
+    }
+  };
+
   const handleApplyTemplate = (templateId: PipelineTemplateId) => {
     const { nextConfig, cells: newCells } = buildCellsFromTemplate(
       templateId,
@@ -2251,6 +2263,7 @@ ${metricLines}`;
             onMoveCell={handleMoveCell}
             onDuplicateCell={handleDuplicateCell}
             onDeleteCell={handleDeleteCell}
+            onDeleteCells={handleDeleteCells}
             onApplyTemplate={handleApplyTemplate}
             onInsertQuickSnippet={handleInsertQuickSnippet}
             onDropCsvFile={processTrainCsvFile}
