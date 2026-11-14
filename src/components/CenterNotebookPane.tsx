@@ -71,7 +71,32 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   const [editingTitleCellId, setEditingTitleCellId] = useState<string | null>(null);
   const [openDropdown, setOpenDropdown] = useState<'templates' | 'snippets' | null>(null);
   const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
+  const [showMinimap, setShowMinimap] = useState<boolean>(true);
+  const [hoveredMinimapCellId, setHoveredMinimapCellId] = useState<string | null>(null);
+  const [scrollProgress, setScrollProgress] = useState<{ topRatio: number; heightRatio: number }>({
+    topRatio: 0,
+    heightRatio: 0.25,
+  });
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const cellRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
+  const handleNotebookScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el || el.scrollHeight <= 0) return;
+    setScrollProgress({
+      topRatio: el.scrollTop / el.scrollHeight,
+      heightRatio: Math.min(1, el.clientHeight / el.scrollHeight),
+    });
+  };
+
+  const jumpToCell = (cellId: string) => {
+    onSelectCell?.(cellId);
+    const targetEl = cellRefs.current[cellId];
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
@@ -292,13 +317,34 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
           )}
         </div>
 
-        <span className="hidden lg:inline text-[10px] font-mono text-[#9aa0a6]">
-          Kéo thả .csv vào đây • Click tên cell để đổi tên
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          {cells.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowMinimap((m) => !m)}
+              className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
+                showMinimap
+                  ? 'bg-[#292a2d] text-[#8ab4f8] border-[#8ab4f8]/50'
+                  : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
+              }`}
+              title="Bật/tắt thanh Minimap thu nhỏ bên phải (giống VS Code)"
+            >
+              Map{cells.some((c) => c.status === 'error') ? ' • !' : ''}
+            </button>
+          )}
+          <span className="hidden lg:inline text-[10px] font-mono text-[#9aa0a6]">
+            Kéo thả .csv vào đây • Click tên cell để đổi tên
+          </span>
+        </div>
       </div>
 
-      {/* Notebook Cells Container */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 custom-scrollbar">
+      {/* Notebook Cells Container + VS Code-style Minimap */}
+      <div className="flex-1 flex min-h-0 overflow-hidden relative">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleNotebookScroll}
+        className="flex-1 overflow-y-auto px-4 py-3 space-y-2 custom-scrollbar"
+      >
         {cells.length === 0 && (
           <div className="p-6 rounded border border-[#3c4043] bg-[#202124] text-center space-y-3 my-4">
             <div className="text-sm font-medium text-[#e8eaed]">
@@ -339,6 +385,9 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
             return (
               <React.Fragment key={cell.id}>
                 <div
+                  ref={(el) => {
+                    cellRefs.current[cell.id] = el;
+                  }}
                   onDoubleClick={() => toggleMarkdownEdit(cell.id, true)}
                   className="rounded border border-[#3c4043] hover:border-[#5f6368] bg-[#202124] overflow-hidden transition-colors"
                 >
@@ -454,6 +503,9 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
           return (
             <React.Fragment key={cell.id}>
               <div
+                ref={(el) => {
+                  cellRefs.current[cell.id] = el;
+                }}
                 onClick={() => onSelectCell?.(cell.id)}
                 className={`rounded border transition-colors overflow-hidden bg-[#202124] ${
                   isRunning
@@ -747,6 +799,91 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
             </React.Fragment>
           );
         })}
+      </div>
+
+      {/* VS Code-style Compact Notebook Minimap (24px wide) */}
+      {showMinimap && cells.length > 0 && (
+        <div className="w-6 shrink-0 bg-[#1a1b1e] border-l border-[#292a2d] py-1.5 px-0.5 flex flex-col gap-1 select-none relative z-20">
+          {/* Viewport slider */}
+          <div
+            className="pointer-events-none absolute left-0 right-0 bg-white/[0.06] border-y border-white/10 transition-all duration-75"
+            style={{
+              top: `${Math.min(92, scrollProgress.topRatio * 100)}%`,
+              height: `${Math.max(8, scrollProgress.heightRatio * 100)}%`,
+            }}
+          />
+
+          {cells.map((cell, idx) => {
+            const lines = cell.currentCode.split('\n');
+            const isErr = cell.status === 'error';
+            const isRun = runningCellId === cell.id || cell.status === 'running';
+            const isOk = cell.status === 'success';
+            const isActive = activeCellId === cell.id;
+            const previewLines = Math.min(6, Math.max(2, Math.ceil(lines.length / 8)));
+            return (
+              <div
+                key={cell.id}
+                onClick={() => jumpToCell(cell.id)}
+                onMouseEnter={() => setHoveredMinimapCellId(cell.id)}
+                onMouseLeave={() =>
+                  setHoveredMinimapCellId((prev) => (prev === cell.id ? null : prev))
+                }
+                style={{ flexGrow: Math.min(Math.max(lines.length, 3), 22) }}
+                className={`relative rounded-[2px] px-[2px] py-[2px] cursor-pointer flex flex-col justify-start gap-[2px] transition-colors ${
+                  isErr
+                    ? 'bg-[#f28b82]/30 border-l-2 border-[#f28b82]'
+                    : isRun
+                    ? 'bg-[#8ab4f8]/25 border-l-2 border-[#8ab4f8] animate-pulse'
+                    : isOk
+                    ? 'bg-[#292a2d]/60 border-l-2 border-[#81c995]'
+                    : isActive
+                    ? 'bg-[#303134] border-l-2 border-[#8ab4f8]'
+                    : 'bg-[#252629]/60 hover:bg-[#303134]'
+                }`}
+              >
+                {Array.from({ length: previewLines }).map((_, lIdx) => {
+                  const sampleLine = lines[lIdx * 3] || lines[lIdx] || '';
+                  const widthPct = Math.min(100, Math.max(25, sampleLine.trim().length * 2));
+                  return (
+                    <div
+                      key={lIdx}
+                      className={`h-[1.5px] rounded-full ${
+                        isErr
+                          ? 'bg-[#f28b82]/90'
+                          : isRun
+                          ? 'bg-[#8ab4f8]/80'
+                          : cell.cellType === 'markdown'
+                          ? 'bg-[#fdd663]/40'
+                          : 'bg-[#9aa0a6]/45'
+                      }`}
+                      style={{ width: `${widthPct}%` }}
+                    />
+                  );
+                })}
+
+                {hoveredMinimapCellId === cell.id && (
+                  <div className="absolute right-7 top-0 px-2 py-1 rounded bg-[#292a2d] border border-[#3c4043] shadow-xl text-[10px] font-mono whitespace-nowrap pointer-events-none z-50 flex items-center gap-1.5">
+                    <span className="text-[#9aa0a6]">[{idx + 1}]</span>
+                    <span className="text-[#e8eaed] max-w-[180px] truncate">
+                      {cell.title}
+                    </span>
+                    {isErr && (
+                      <span className="px-1 rounded bg-[#f28b82]/20 text-[#f28b82] font-semibold">
+                        ERROR
+                      </span>
+                    )}
+                    {isOk && (
+                      <span className="px-1 rounded bg-[#81c995]/20 text-[#81c995]">
+                        OK
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
       </div>
 
       {/* Plot Lightbox / Zoom Modal */}
