@@ -162,6 +162,7 @@ export function App() {
   const cloudBrokerRef = useRef<SupabaseCloudBroker | null>(null);
   const pendingCellResolverRef = useRef<((success: boolean) => void) | null>(null);
   const stopRequestedRef = useRef<boolean>(false);
+  const whatIfBufferRef = useRef<string>('');
 
   const trainCsvInputRef = useRef<HTMLInputElement | null>(null);
   const testCsvInputRef = useRef<HTMLInputElement | null>(null);
@@ -435,7 +436,11 @@ export function App() {
 
       if (cell_id === 'whatif_predict') {
         setWhatIfLoading(false);
-        const text = stdout_summary || '';
+        const text = [whatIfBufferRef.current, stdout_summary || '']
+          .filter(Boolean)
+          .join('\n')
+          .trim();
+        whatIfBufferRef.current = '';
         const markerIdx = text.lastIndexOf('__WHATIF__:');
         if (markerIdx !== -1) {
           try {
@@ -588,6 +593,10 @@ export function App() {
         setPyodideStatus(status);
         if (message) setPyodideStatusText(message);
       } else if (type === 'log_chunk') {
+        if (cellId === 'whatif_predict') {
+          whatIfBufferRef.current += text;
+          return;
+        }
         appendCliLog(stream || 'stdout', text, cellId);
         if (cellId) {
           setCells((prev) =>
@@ -655,6 +664,10 @@ export function App() {
   useEffect(() => {
     const broker = new SupabaseCloudBroker(sessionId, supabaseCreds, {
       onLogChunk: ({ cell_id, stream, text }) => {
+        if (cell_id === 'whatif_predict') {
+          whatIfBufferRef.current += text;
+          return;
+        }
         appendCliLog(stream, text, cell_id);
         setCells((prev) =>
           prev.map((c) =>
@@ -1544,6 +1557,7 @@ ${metricLines}`;
   const handleWhatIfPredict = (row: Record<string, string | number>) => {
     setWhatIfLoading(true);
     setWhatIfResult(null);
+    whatIfBufferRef.current = '';
     const jsonPayload = JSON.stringify(row).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const code = [
       'import json, pandas as pd',
