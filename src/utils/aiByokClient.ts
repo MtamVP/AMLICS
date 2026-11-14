@@ -66,9 +66,19 @@ export const PROVIDER_CATALOG: Record<AiProvider, ProviderMeta> = {
   },
 };
 
+export interface NamedApiKey {
+  id: string;
+  name: string;
+  key: string;
+  createdAt: string;
+}
+
 export interface StoredByokState {
   activeProvider: AiProvider;
   keys: Record<AiProvider, string>;
+  keyVaults: Record<AiProvider, NamedApiKey[]>;
+  activeKeyIds: Record<AiProvider, string>;
+  autoRotateOnError: boolean;
   models: Record<AiProvider, string>;
 }
 
@@ -80,6 +90,9 @@ export function getStoredByokState(): StoredByokState {
   const defaults: StoredByokState = {
     activeProvider: 'gemini',
     keys: { gemini: '', gpt: '', deepseek: '' },
+    keyVaults: { gemini: [], gpt: [], deepseek: [] },
+    activeKeyIds: { gemini: '', gpt: '', deepseek: '' },
+    autoRotateOnError: true,
     models: {
       gemini: PROVIDER_CATALOG.gemini.defaultModel,
       gpt: PROVIDER_CATALOG.gpt.defaultModel,
@@ -91,23 +104,71 @@ export function getStoredByokState(): StoredByokState {
     const raw = localStorage.getItem(STORAGE_V2_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<StoredByokState>;
+      const mergedKeys: Record<AiProvider, string> = {
+        ...defaults.keys,
+        ...(parsed.keys || {}),
+      };
+      const mergedVaults: Record<AiProvider, NamedApiKey[]> = {
+        gemini: Array.isArray(parsed.keyVaults?.gemini) ? parsed.keyVaults.gemini : [],
+        gpt: Array.isArray(parsed.keyVaults?.gpt) ? parsed.keyVaults.gpt : [],
+        deepseek: Array.isArray(parsed.keyVaults?.deepseek) ? parsed.keyVaults.deepseek : [],
+      };
+      const mergedActiveIds: Record<AiProvider, string> = {
+        ...defaults.activeKeyIds,
+        ...(parsed.activeKeyIds || {}),
+      };
+
+      // Migrate single key -> named key vault entry per provider if vault is empty
+      (['gemini', 'gpt', 'deepseek'] as AiProvider[]).forEach((p) => {
+        const legacyStr = (mergedKeys[p] || '').trim();
+        if (mergedVaults[p].length === 0 && legacyStr) {
+          const migratedId = `key-${p}-1`;
+          mergedVaults[p] = [
+            {
+              id: migratedId,
+              name: `${PROVIDER_CATALOG[p].label} Key 1`,
+              key: legacyStr,
+              createdAt: new Date().toISOString(),
+            },
+          ];
+          mergedActiveIds[p] = migratedId;
+        } else if (mergedVaults[p].length > 0) {
+          const found = mergedVaults[p].find((k) => k.id === mergedActiveIds[p]) || mergedVaults[p][0];
+          mergedActiveIds[p] = found.id;
+          mergedKeys[p] = found.key;
+        }
+      });
+
       return {
         activeProvider:
           parsed.activeProvider && parsed.activeProvider in PROVIDER_CATALOG
             ? parsed.activeProvider
             : 'gemini',
-        keys: { ...defaults.keys, ...(parsed.keys || {}) },
+        keys: mergedKeys,
+        keyVaults: mergedVaults,
+        activeKeyIds: mergedActiveIds,
+        autoRotateOnError: parsed.autoRotateOnError ?? true,
         models: { ...defaults.models, ...(parsed.models || {}) },
       };
     }
 
     // Migrate legacy v1
     const oldProv = localStorage.getItem(LEGACY_PROVIDER_KEY);
-    const oldKey = localStorage.getItem(LEGACY_API_KEY) || '';
+    const oldKey = (localStorage.getItem(LEGACY_API_KEY) || '').trim();
     if (oldKey) {
       const mapped: AiProvider = oldProv === 'openai' ? 'gpt' : 'gemini';
+      const migratedId = `key-${mapped}-1`;
       defaults.activeProvider = mapped;
       defaults.keys[mapped] = oldKey;
+      defaults.keyVaults[mapped] = [
+        {
+          id: migratedId,
+          name: `${PROVIDER_CATALOG[mapped].label} Key 1`,
+          key: oldKey,
+          createdAt: new Date().toISOString(),
+        },
+      ];
+      defaults.activeKeyIds[mapped] = migratedId;
     }
   } catch {
     // ignore

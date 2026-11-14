@@ -4,8 +4,10 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  Plus,
   RefreshCw,
   Sparkles,
+  Trash2,
   X,
 } from 'lucide-react';
 import {
@@ -15,6 +17,7 @@ import {
   askAiToOptimizePipeline,
   fetchProviderModels,
   getStoredByokState,
+  NamedApiKey,
   PROVIDER_CATALOG,
   saveByokState,
   StoredByokState,
@@ -142,6 +145,10 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
   const [selectedTaskId, setSelectedTaskId] = useState<string>('auto_optimize');
   const [replaceActiveCell, setReplaceActiveCell] = useState<boolean>(true);
   const [showKey, setShowKey] = useState(false);
+  const [isAddKeyOpen, setIsAddKeyOpen] = useState(false);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyValue, setNewKeyValue] = useState('');
+  const [addKeyError, setAddKeyError] = useState<string | null>(null);
   const [customModelMode, setCustomModelMode] = useState(false);
   const [liveModels, setLiveModels] = useState<Record<AiProvider, string[]>>({
     gemini: [],
@@ -167,9 +174,18 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
 
   const provider = byok.activeProvider;
   const meta = PROVIDER_CATALOG[provider];
-  const currentKey = byok.keys[provider] || '';
+  const providerVault = byok.keyVaults[provider] || [];
+  const activeKeyObj =
+    providerVault.find((k) => k.id === byok.activeKeyIds[provider]) || providerVault[0] || null;
+  const currentKey = activeKeyObj?.key || byok.keys[provider] || '';
   const currentModel = byok.models[provider] || meta.defaultModel;
   const hasKey = currentKey.trim().length > 0;
+
+  const maskKey = (k: string) => {
+    const t = k.trim();
+    if (t.length <= 10) return '••••••';
+    return `${t.slice(0, 5)}••••${t.slice(-4)}`;
+  };
 
   const updateByok = (next: StoredByokState) => {
     setByok(next);
@@ -180,15 +196,73 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
     setErrorMsg(null);
     setStatusMsg(null);
     setCustomModelMode(false);
+    setIsAddKeyOpen(false);
     updateByok({ ...byok, activeProvider: p });
   };
 
-  const handleKeyChange = (val: string) => {
-    const next: StoredByokState = {
+  const handleSelectVaultKey = (keyId: string) => {
+    const found = providerVault.find((k) => k.id === keyId);
+    if (!found) return;
+    updateByok({
       ...byok,
-      keys: { ...byok.keys, [provider]: val },
+      activeKeyIds: { ...byok.activeKeyIds, [provider]: found.id },
+      keys: { ...byok.keys, [provider]: found.key },
+    });
+    setErrorMsg(null);
+    setStatusMsg(`Đã chọn key "${found.name}" cho ${meta.label}.`);
+  };
+
+  const handleOpenAddKeyModal = () => {
+    setNewKeyName(`${meta.label} Key ${providerVault.length + 1}`);
+    setNewKeyValue('');
+    setShowKey(false);
+    setAddKeyError(null);
+    setIsAddKeyOpen(true);
+  };
+
+  const handleConfirmAddKey = () => {
+    const trimmedName = newKeyName.trim() || `${meta.label} Key ${providerVault.length + 1}`;
+    const trimmedKey = newKeyValue.trim();
+    if (!trimmedKey) {
+      setAddKeyError(`Vui lòng dán ${meta.label} API Key.`);
+      return;
+    }
+    const newEntry: NamedApiKey = {
+      id: `key-${provider}-${Date.now()}`,
+      name: trimmedName,
+      key: trimmedKey,
+      createdAt: new Date().toISOString(),
     };
-    setByok(next);
+    const nextVault = [...providerVault, newEntry];
+    updateByok({
+      ...byok,
+      keyVaults: { ...byok.keyVaults, [provider]: nextVault },
+      activeKeyIds: { ...byok.activeKeyIds, [provider]: newEntry.id },
+      keys: { ...byok.keys, [provider]: newEntry.key },
+    });
+    setIsAddKeyOpen(false);
+    setErrorMsg(null);
+    setStatusMsg(`Đã thêm key "${newEntry.name}" vào kho riêng của ${meta.label}.`);
+  };
+
+  const handleDeleteActiveKey = () => {
+    if (!activeKeyObj) return;
+    const nextVault = providerVault.filter((k) => k.id !== activeKeyObj.id);
+    const nextActive = nextVault[0] || null;
+    updateByok({
+      ...byok,
+      keyVaults: { ...byok.keyVaults, [provider]: nextVault },
+      activeKeyIds: { ...byok.activeKeyIds, [provider]: nextActive?.id || '' },
+      keys: { ...byok.keys, [provider]: nextActive?.key || '' },
+    });
+    setStatusMsg(`Đã xóa key "${activeKeyObj.name}" khỏi ${meta.label}.`);
+  };
+
+  const handleRotateNextKey = () => {
+    if (providerVault.length < 2) return;
+    const curIdx = providerVault.findIndex((k) => k.id === activeKeyObj?.id);
+    const nextEntry = providerVault[(curIdx + 1) % providerVault.length];
+    handleSelectVaultKey(nextEntry.id);
   };
 
   const handleModelChange = (val: string) => {
@@ -198,15 +272,54 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
     });
   };
 
-  const handleSaveKey = () => {
-    const trimmed = currentKey.trim();
-    const next: StoredByokState = {
-      ...byok,
-      keys: { ...byok.keys, [provider]: trimmed },
-    };
-    updateByok(next);
-    setErrorMsg(null);
-    setStatusMsg(`Đã lưu API Key ${meta.label} vào trình duyệt (LocalStorage).`);
+  const runWithKeyRotation = async <T,>(
+    runner: (apiKey: string) => Promise<T>
+  ): Promise<{ result: T; usedKeyName: string; rotated: boolean }> => {
+    if (providerVault.length === 0) {
+      const res = await runner(currentKey);
+      return { result: res, usedKeyName: 'Default Key', rotated: false };
+    }
+    const startIdx = Math.max(
+      0,
+      providerVault.findIndex((k) => k.id === activeKeyObj?.id)
+    );
+    const ordered = [
+      ...providerVault.slice(startIdx),
+      ...providerVault.slice(0, startIdx),
+    ];
+    let lastErr: unknown = null;
+    for (let i = 0; i < ordered.length; i++) {
+      const candidate = ordered[i];
+      try {
+        const res = await runner(candidate.key);
+        if (i > 0) {
+          updateByok({
+            ...byok,
+            activeKeyIds: { ...byok.activeKeyIds, [provider]: candidate.id },
+            keys: { ...byok.keys, [provider]: candidate.key },
+          });
+        }
+        return { result: res, usedKeyName: candidate.name, rotated: i > 0 };
+      } catch (err) {
+        lastErr = err;
+        const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+        const isRotatable =
+          byok.autoRotateOnError &&
+          ordered.length > 1 &&
+          (msg.includes('429') ||
+            msg.includes('quota') ||
+            msg.includes('rate') ||
+            msg.includes('limit') ||
+            msg.includes('401') ||
+            msg.includes('403') ||
+            msg.includes('insufficient') ||
+            msg.includes('resource_exhausted'));
+        if (!isRotatable || i === ordered.length - 1) {
+          throw err;
+        }
+      }
+    }
+    throw lastErr;
   };
 
   const handleFetchModels = async () => {
@@ -239,19 +352,23 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
     setStatusMsg(null);
     saveByokState(byok);
     try {
-      const plan = await askAiToOptimizePipeline(
-        provider,
-        currentKey,
-        currentModel,
-        dataProfile,
-        config,
-        experiments,
-        customPrompt ||
-          'Tối ưu toàn bộ tham số và tiền xử lý để đạt điểm CV cao nhất.'
+      const { result: plan, usedKeyName, rotated } = await runWithKeyRotation((k) =>
+        askAiToOptimizePipeline(
+          provider,
+          k,
+          currentModel,
+          dataProfile,
+          config,
+          experiments,
+          customPrompt ||
+            'Tối ưu toàn bộ tham số và tiền xử lý để đạt điểm CV cao nhất.'
+        )
       );
       onApplyAiOptimization(plan);
       setStatusMsg(
-        `[${meta.label} • ${currentModel}] Đã tối ưu [Auto]: ${plan.explanation}`
+        `[${meta.label} • ${currentModel} • ${usedKeyName}${
+          rotated ? ' (Auto-Rotated)' : ''
+        }] Đã tối ưu [Auto]: ${plan.explanation}`
       );
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
@@ -282,15 +399,17 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
     setStatusMsg(null);
     saveByokState(byok);
     try {
-      const res = await askAiToGenerateCode(
-        provider,
-        currentKey,
-        currentModel,
-        dataProfile,
-        config,
-        experiments,
-        promptToSend,
-        lastErrorText
+      const { result: res, usedKeyName, rotated } = await runWithKeyRotation((k) =>
+        askAiToGenerateCode(
+          provider,
+          k,
+          currentModel,
+          dataProfile,
+          config,
+          experiments,
+          promptToSend,
+          lastErrorText
+        )
       );
       if (
         actionKey === 'refactor_active_cell' &&
@@ -300,12 +419,16 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
       ) {
         onReplaceCellCode(activeCell.id, res.code);
         setStatusMsg(
-          `[${meta.label} • ${currentModel}] Đã cập nhật trực tiếp cell "${activeCell.title}": ${res.explanation}`
+          `[${meta.label} • ${currentModel} • ${usedKeyName}${
+            rotated ? ' (Auto-Rotated)' : ''
+          }] Đã cập nhật trực tiếp cell "${activeCell.title}": ${res.explanation}`
         );
       } else {
         onInsertAiCell(res.title || 'AI Generated Cell', res.code);
         setStatusMsg(
-          `[${meta.label} • ${currentModel}] Đã chèn cell "${res.title}": ${res.explanation}`
+          `[${meta.label} • ${currentModel} • ${usedKeyName}${
+            rotated ? ' (Auto-Rotated)' : ''
+          }] Đã chèn cell "${res.title}": ${res.explanation}`
         );
       }
       if (!presetPrompt) setCustomPrompt('');
@@ -412,13 +535,13 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
             </div>
           </div>
 
-          {/* Step 2: API Key + Model Selection */}
+          {/* Step 2: Select Saved API Key (Per-Provider Vault) + Model Selection */}
           <div className="p-3.5 rounded-md bg-[#18191a] border border-[#3c4043] space-y-3">
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
                 <label className="text-[11px] font-medium text-[#e8eaed] flex items-center gap-1.5">
                   <KeyRound className="w-3.5 h-3.5 text-[#8ab4f8]" />
-                  <span>2. Nhập {meta.label} API Key</span>
+                  <span>2. Chọn {meta.label} API Key ({providerVault.length} key đã lưu)</span>
                 </label>
                 {hasKey && (
                   <span className="inline-flex items-center gap-1 text-[10px] font-mono text-[#81c995]">
@@ -428,36 +551,72 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <input
-                    type={showKey ? 'text' : 'password'}
-                    value={currentKey}
-                    onChange={(e) => handleKeyChange(e.target.value)}
-                    placeholder={`Dán ${meta.label} API Key (${meta.keyPlaceholder})`}
-                    className="w-full bg-[#202124] border border-[#3c4043] rounded pl-2.5 pr-8 py-1.5 text-xs font-mono text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8]"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKey((s) => !s)}
-                    title={showKey ? 'Ẩn Key' : 'Hiện Key'}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[#9aa0a6] hover:text-[#e8eaed]"
-                  >
-                    {showKey ? (
-                      <EyeOff className="w-3.5 h-3.5" />
-                    ) : (
-                      <Eye className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </div>
+              <div className="flex items-center gap-1.5">
+                <select
+                  value={activeKeyObj?.id || ''}
+                  onChange={(e) => handleSelectVaultKey(e.target.value)}
+                  disabled={providerVault.length === 0}
+                  className="flex-1 min-w-0 bg-[#202124] border border-[#3c4043] rounded px-2.5 py-1.5 text-xs font-mono text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8] disabled:opacity-60"
+                >
+                  {providerVault.length === 0 ? (
+                    <option value="">
+                      -- Chưa có Key {meta.label} nào (Bấm &quot;+ Thêm Key&quot; để nhập) --
+                    </option>
+                  ) : (
+                    providerVault.map((k, idx) => (
+                      <option key={k.id} value={k.id}>
+                        #{idx + 1} {k.name} ({maskKey(k.key)})
+                      </option>
+                    ))
+                  )}
+                </select>
+
                 <button
                   type="button"
-                  onClick={handleSaveKey}
-                  className="px-3 py-1.5 rounded bg-[#303134] hover:bg-[#3c4043] border border-[#3c4043] text-xs font-medium text-[#e8eaed] cursor-pointer"
+                  onClick={handleOpenAddKeyModal}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#18191a] text-xs font-semibold cursor-pointer shrink-0 transition-colors"
+                  title={`Thêm API Key mới cho riêng ${meta.label}`}
                 >
-                  Lưu Key
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Thêm Key</span>
                 </button>
+
+                {providerVault.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={handleRotateNextKey}
+                    className="p-1.5 rounded bg-[#303134] hover:bg-[#3c4043] border border-[#3c4043] text-[#8ab4f8] cursor-pointer shrink-0"
+                    title={`Xoay sang Key ${meta.label} tiếp theo`}
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                )}
+
+                {activeKeyObj && (
+                  <button
+                    type="button"
+                    onClick={handleDeleteActiveKey}
+                    className="p-1.5 rounded bg-[#303134] hover:bg-[#f28b82]/20 border border-[#3c4043] text-[#9aa0a6] hover:text-[#f28b82] cursor-pointer shrink-0"
+                    title="Xóa Key đang chọn"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
+
+              <label className="flex items-center gap-2 text-[11px] text-[#9aa0a6] cursor-pointer select-none pt-0.5">
+                <input
+                  type="checkbox"
+                  checked={byok.autoRotateOnError}
+                  onChange={(e) =>
+                    updateByok({ ...byok, autoRotateOnError: e.target.checked })
+                  }
+                  className="accent-[#8ab4f8]"
+                />
+                <span>
+                  Tự động xoay sang Key {meta.label} tiếp theo nếu gặp lỗi quota / 429 / 401
+                </span>
+              </label>
             </div>
 
             {/* Model Picker (unlocked after key entered, or visible with hint) */}
@@ -666,6 +825,111 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Sub-Modal Pop-up: Thêm Tên Key & API Key cho riêng Provider đang chọn */}
+      {isAddKeyOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+          onClick={() => setIsAddKeyOpen(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-lg bg-[#202124] border border-[#3c4043] shadow-2xl overflow-hidden text-xs"
+          >
+            <div className="px-4 py-3 bg-[#1b1c20] border-b border-[#3c4043] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <KeyRound className="w-4 h-4 text-[#8ab4f8]" />
+                <span className="font-semibold text-[#e8eaed]">
+                  Thêm Key mới — {meta.label} ({meta.tagline})
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddKeyOpen(false)}
+                className="p-1 rounded hover:bg-[#303134] text-[#9aa0a6] hover:text-[#e8eaed]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-[#bdc1c6] block">
+                  Tên gợi nhớ cho Key
+                </label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={newKeyName}
+                  onChange={(e) => setNewKeyName(e.target.value)}
+                  placeholder={`VD: ${meta.label} Cá nhân, Key Dự phòng 2...`}
+                  className="w-full bg-[#18191a] border border-[#3c4043] rounded px-3 py-1.5 text-xs text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8]"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-[#bdc1c6] block">
+                  {meta.label} API Key
+                </label>
+                <div className="relative">
+                  <input
+                    type={showKey ? 'text' : 'password'}
+                    value={newKeyValue}
+                    onChange={(e) => {
+                      setNewKeyValue(e.target.value);
+                      setAddKeyError(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleConfirmAddKey();
+                    }}
+                    placeholder={`Dán ${meta.label} API Key (${meta.keyPlaceholder})`}
+                    className="w-full bg-[#18191a] border border-[#3c4043] rounded pl-3 pr-8 py-1.5 text-xs font-mono text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowKey((s) => !s)}
+                    title={showKey ? 'Ẩn Key' : 'Hiện Key'}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-[#9aa0a6] hover:text-[#e8eaed]"
+                  >
+                    {showKey ? (
+                      <EyeOff className="w-3.5 h-3.5" />
+                    ) : (
+                      <Eye className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="text-[10px] text-[#9aa0a6]">
+                Key này chỉ lưu riêng trong kho của <span className="text-[#8ab4f8] font-medium">{meta.label}</span> trên trình duyệt (LocalStorage), không dùng chung với nền tảng AI khác.
+              </div>
+
+              {addKeyError && (
+                <div className="p-2 rounded bg-[#f28b82]/10 border border-[#f28b82]/40 text-[#f28b82] text-[11px]">
+                  {addKeyError}
+                </div>
+              )}
+            </div>
+
+            <div className="px-4 py-2.5 bg-[#1b1c20] border-t border-[#3c4043] flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsAddKeyOpen(false)}
+                className="px-3 py-1.5 rounded bg-[#303134] hover:bg-[#3c4043] text-[#e8eaed] text-xs"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAddKey}
+                className="px-3.5 py-1.5 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#18191a] text-xs font-semibold"
+              >
+                Lưu Key {meta.label}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
