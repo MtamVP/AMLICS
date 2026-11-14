@@ -2357,8 +2357,13 @@ ${metricLines}`;
         config={config}
         experiments={experiments}
         lastErrorText={lastErrorText}
+        activeCell={(() => {
+          const found = cells.find((c) => c.id === activeCellId);
+          return found ? { id: found.id, title: found.title, code: found.currentCode } : null;
+        })()}
         onApplyAiOptimization={handleApplyAiOptimization}
         onInsertAiCell={handleInsertAiCell}
+        onReplaceCellCode={handleEditCellCode}
       />
 
       <CommandPaletteModal

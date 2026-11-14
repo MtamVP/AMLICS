@@ -6,9 +6,7 @@ import {
   KeyRound,
   RefreshCw,
   Sparkles,
-  Wrench,
   X,
-  Code2,
 } from 'lucide-react';
 import {
   AiOptimizationPlan,
@@ -34,9 +32,97 @@ interface AiByokModalProps {
   config: PipelineConfig;
   experiments: ExperimentRecord[];
   lastErrorText?: string;
+  activeCell?: { id: string; title: string; code: string } | null;
   onApplyAiOptimization: (plan: AiOptimizationPlan) => void;
   onInsertAiCell: (title: string, code: string) => void;
+  onReplaceCellCode?: (cellId: string, newCode: string) => void;
 }
+
+interface AiTaskPreset {
+  id: string;
+  label: string;
+  description: string;
+  prompt?: string;
+}
+
+const AI_TASK_PRESETS: AiTaskPreset[] = [
+  {
+    id: 'auto_optimize',
+    label: '✨ AI Auto-Optimize Toàn Bộ Pipeline',
+    description:
+      'Tự chọn Model, CV Strategy, Preprocessing & Hyperparameters tối ưu nhất cho dataset hiện tại + gắn nhãn [Auto].',
+  },
+  {
+    id: 'complete_pipeline_code',
+    label: '💻 Viết Code Python Hoàn Thiện (End-to-End Clean Code)',
+    description:
+      'Sinh 1 cell Python hoàn chỉnh, sạch đẹp, có comment tiếng Việt giải thích từng bước từ tiền xử lý đến đánh giá & lưu submission.',
+    prompt:
+      'Viết một cell Python hoàn thiện, sạch sẽ, chạy độc lập trên df hiện tại: xử lý missing/inf, chia tập chống leakage, huấn luyện mô hình tốt nhất với Pipeline, in chi tiết metric Holdout + CV và vẽ biểu đồ đánh giá. Có comment tiếng Việt rõ ràng.',
+  },
+  {
+    id: 'refactor_active_cell',
+    label: '🛠️ Hoàn thiện, Tối ưu & Chú thích lại Cell đang chọn',
+    description:
+      'Đọc code của cell bạn đang chọn trong Notebook, sửa lỗi tiềm ẩn, tối ưu tốc độ và thêm chú thích học tập dễ hiểu.',
+    prompt:
+      'Hãy đọc code của cell đang chọn, hoàn thiện các phần còn thiếu, xử lý edge case (NaN/inf/dtype), tối ưu hiệu năng và thêm comment tiếng Việt giải thích dễ hiểu.',
+  },
+  {
+    id: 'feature_engineering',
+    label: '🧬 + Feature Engineering Cell (Tạo đặc trưng mới)',
+    description:
+      'Sinh cell Python tạo 4-6 biến tương tác, tỷ lệ hoặc biến thời gian mới dựa trên schema cột thật, không rò rỉ Target.',
+    prompt:
+      'Viết Python feature engineering tạo 4-6 đặc trưng mới có ý nghĩa dựa trên các cột hiện có của df (tỷ lệ, tương tác, nhóm thống kê), đảm bảo an toàn không rò rỉ target và kiểm tra lại shape/NaN.',
+  },
+  {
+    id: 'deep_eda_charts',
+    label: '📊 + Deep EDA & Visualization Cell (Biểu đồ chuyên sâu)',
+    description:
+      'Sinh cell vẽ 3-4 biểu đồ phân tích phân phối, ngoại lai, tương quan với Target phù hợp đúng các cột hiện có.',
+    prompt:
+      'Viết code EDA bằng matplotlib vẽ 3-4 biểu đồ trực quan (dark_background #202124) phân tích phân phối các cột quan trọng, outlier và mối liên hệ với cột target của df.',
+  },
+  {
+    id: 'ensemble_blending',
+    label: '🏆 + Ensemble / Stacking (Kết hợp nhiều Model tăng điểm)',
+    description:
+      'Viết code Voting / Stacking kết hợp HistGradientBoosting, RandomForest, ExtraTrees và Linear/Ridge để tăng điểm CV & Holdout.',
+    prompt:
+      'Viết code Python xây dựng mô hình Ensemble (Voting/Stacking) kết hợp HistGradientBoosting, RandomForest, ExtraTrees và Linear/Ridge trên X_train, y_train sử dụng preprocessor hiện tại, so sánh điểm CV/Holdout với mô hình đơn lẻ.',
+  },
+  {
+    id: 'hyperparam_tuning_code',
+    label: '🎛️ + Hyperparameter Search Chuyên sâu (RandomizedSearchCV)',
+    description:
+      'Sinh cell tìm kiếm bộ siêu tham số tối ưu với không gian tìm kiếm thông minh và in ra Top 5 cấu hình tốt nhất.',
+    prompt:
+      'Viết code RandomizedSearchCV chuyên sâu cho mô hình hiện tại trên X_train, y_train với pipeline anti-leakage, in Top 5 bộ tham số tốt nhất và cập nhật full_pipeline.',
+  },
+  {
+    id: 'diagnose_fix',
+    label: '🔧 Chẩn đoán Lỗi & Audit Pipeline (Leakage / Outlier / Bug)',
+    description:
+      'Đọc traceback lỗi gần nhất (nếu có) và viết code khắc phục, hoặc kiểm tra rò rỉ dữ liệu & các điểm làm tụt điểm CV.',
+  },
+  {
+    id: 'explain_results',
+    label: '🎓 Phân tích Điểm số & Kế hoạch Tăng điểm (Coach ML)',
+    description:
+      'Phân tích kết quả các lần chạy trên Leaderboard (Overfit/Underfit) và sinh cell kiểm chứng bước cải thiện tiếp theo.',
+    prompt:
+      'Dựa trên lịch sử các lần chạy (experiments) và cấu hình hiện tại, hãy phân tích nguyên nhân điểm chưa tối ưu (Overfit, Underfit, mất cân bằng lớp hay thiếu feature) và viết code kiểm chứng giải pháp cải thiện điểm.',
+  },
+  {
+    id: 'markdown_report',
+    label: '📝 Sinh Báo cáo Tổng kết Thí nghiệm (Report Printer)',
+    description:
+      'Tạo cell tổng hợp bài toán, dữ liệu, bảng kết quả mô hình, nhận xét ưu/nhược điểm sẵn sàng copy vào báo cáo.',
+    prompt:
+      'Viết cell Python in ra một báo cáo tổng kết thí nghiệm Machine Learning hoàn chỉnh bằng tiếng Việt (tổng quan dataset, phương pháp chống leakage, kết quả các lần chạy, phân tích Feature Importance và kết luận).',
+  },
+];
 
 const PROVIDERS: AiProvider[] = ['gemini', 'gpt', 'deepseek'];
 
@@ -47,10 +133,14 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
   config,
   experiments,
   lastErrorText,
+  activeCell,
   onApplyAiOptimization,
   onInsertAiCell,
+  onReplaceCellCode,
 }) => {
   const [byok, setByok] = useState<StoredByokState>(() => getStoredByokState());
+  const [selectedTaskId, setSelectedTaskId] = useState<string>('auto_optimize');
+  const [replaceActiveCell, setReplaceActiveCell] = useState<boolean>(true);
   const [showKey, setShowKey] = useState(false);
   const [customModelMode, setCustomModelMode] = useState(false);
   const [liveModels, setLiveModels] = useState<Record<AiProvider, string[]>>({
@@ -172,15 +262,19 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
 
   const handleGenerateCell = async (
     presetPrompt?: string,
-    actionKey: 'fe' | 'diagnose' | 'custom' = 'custom'
+    actionKey: string = 'custom'
   ) => {
     if (!hasKey) {
       setErrorMsg(`Vui lòng nhập ${meta.label} API Key ở bước 2 trước khi gọi AI.`);
       return;
     }
-    const promptToSend = (presetPrompt || customPrompt).trim();
+    const activeCellContext =
+      activeCell && actionKey === 'refactor_active_cell'
+        ? `\n\n[CELL ĐANG CHỌN: "${activeCell.title}"]\n\`\`\`python\n${activeCell.code}\n\`\`\``
+        : '';
+    const promptToSend = `${(presetPrompt || customPrompt).trim()}${activeCellContext}`;
     if (!promptToSend) {
-      setErrorMsg('Hãy nhập yêu cầu hoặc chọn 1 tác vụ gợi ý bên dưới.');
+      setErrorMsg('Hãy nhập yêu cầu hoặc chọn 1 tác vụ gợi ý trong danh sách.');
       return;
     }
     setLoadingAction(actionKey);
@@ -198,10 +292,22 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
         promptToSend,
         lastErrorText
       );
-      onInsertAiCell(res.title || 'AI Generated Cell', res.code);
-      setStatusMsg(
-        `[${meta.label} • ${currentModel}] Đã chèn cell "${res.title}": ${res.explanation}`
-      );
+      if (
+        actionKey === 'refactor_active_cell' &&
+        replaceActiveCell &&
+        activeCell &&
+        onReplaceCellCode
+      ) {
+        onReplaceCellCode(activeCell.id, res.code);
+        setStatusMsg(
+          `[${meta.label} • ${currentModel}] Đã cập nhật trực tiếp cell "${activeCell.title}": ${res.explanation}`
+        );
+      } else {
+        onInsertAiCell(res.title || 'AI Generated Cell', res.code);
+        setStatusMsg(
+          `[${meta.label} • ${currentModel}] Đã chèn cell "${res.title}": ${res.explanation}`
+        );
+      }
       if (!presetPrompt) setCustomPrompt('');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
@@ -424,98 +530,94 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
             </div>
           </div>
 
-          {/* Step 4: Quick AI Actions */}
-          <div className="space-y-2">
+          {/* Step 4: Quick AI Actions (Compact Dropbox) */}
+          <div className="space-y-2.5">
             <span className="text-[11px] font-medium text-[#9aa0a6] uppercase tracking-wider font-mono block">
               4. Tác vụ AI cho Notebook ({dataProfile?.dataset_name || 'Chưa load dataset'})
             </span>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <button
-                type="button"
-                disabled={loading}
-                onClick={handleAutoOptimize}
-                className="p-3 rounded-md bg-[#8ab4f8] hover:bg-[#aecbfa] disabled:opacity-50 text-[#202124] text-left transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-1.5 font-semibold text-xs">
-                  <Sparkles
-                    className={`w-3.5 h-3.5 ${
-                      loadingAction === 'optimize' ? 'animate-spin' : ''
-                    }`}
-                  />
-                  <span>
-                    {loadingAction === 'optimize'
-                      ? 'Đang gọi AI...'
-                      : 'AI Auto-Optimize'}
-                  </span>
-                </div>
-                <div className="text-[10px] opacity-85 mt-1 leading-snug">
-                  Tự chọn model, CV, preprocessing &amp; tham số tối ưu + gắn nhãn [Auto].
-                </div>
-              </button>
+            {(() => {
+              const activePreset =
+                AI_TASK_PRESETS.find((t) => t.id === selectedTaskId) ||
+                AI_TASK_PRESETS[0];
 
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() =>
-                  handleGenerateCell(
-                    'Viết Python feature engineering tạo 3-5 đặc trưng mới có ý nghĩa dựa trên các cột hiện có của df, không rò rỉ target.',
-                    'fe'
-                  )
+              const runSelectedPreset = () => {
+                if (activePreset.id === 'auto_optimize') {
+                  void handleAutoOptimize();
+                  return;
                 }
-                className="p-3 rounded-md bg-[#292a2d] hover:bg-[#35363a] disabled:opacity-50 border border-[#3c4043] text-[#e8eaed] text-left transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-1.5 font-semibold text-xs text-[#81c995]">
-                  <Code2
-                    className={`w-3.5 h-3.5 ${
-                      loadingAction === 'fe' ? 'animate-pulse' : ''
-                    }`}
-                  />
-                  <span>
-                    {loadingAction === 'fe'
-                      ? 'Đang sinh code...'
-                      : '+ Feature Eng. Cell'}
-                  </span>
-                </div>
-                <div className="text-[10px] text-[#9aa0a6] mt-1 leading-snug">
-                  Sinh cell Python tạo feature mới dựa trên schema cột hiện tại.
-                </div>
-              </button>
+                if (activePreset.id === 'diagnose_fix') {
+                  const diagPrompt = lastErrorText
+                    ? 'Phân tích lỗi gần nhất và viết đoạn code sửa lỗi hoặc kiểm tra dữ liệu an toàn.'
+                    : 'Viết code kiểm tra nhanh các yếu tố có thể làm giảm điểm CV (leakage, outliers, skewness) và gợi ý cải thiện.';
+                  void handleGenerateCell(diagPrompt, 'diagnose_fix');
+                  return;
+                }
+                const extraNote = customPrompt.trim()
+                  ? `\nYêu cầu bổ sung từ người dùng: ${customPrompt.trim()}`
+                  : '';
+                void handleGenerateCell(
+                  `${activePreset.prompt || ''}${extraNote}`,
+                  activePreset.id
+                );
+              };
 
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() =>
-                  handleGenerateCell(
-                    lastErrorText
-                      ? 'Phân tích lỗi gần nhất và viết đoạn code sửa lỗi hoặc kiểm tra dữ liệu an toàn.'
-                      : 'Viết code kiểm tra nhanh các yếu tố có thể làm giảm điểm CV (leakage, outliers, skewness) và gợi ý cải thiện.',
-                    'diagnose'
-                  )
-                }
-                className="p-3 rounded-md bg-[#292a2d] hover:bg-[#35363a] disabled:opacity-50 border border-[#3c4043] text-[#e8eaed] text-left transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-1.5 font-semibold text-xs text-[#fdd663]">
-                  <Wrench
-                    className={`w-3.5 h-3.5 ${
-                      loadingAction === 'diagnose' ? 'animate-spin' : ''
-                    }`}
-                  />
-                  <span>
-                    {loadingAction === 'diagnose'
-                      ? 'Đang phân tích...'
-                      : lastErrorText
-                      ? 'Chẩn đoán lỗi'
-                      : 'Audit Pipeline'}
-                  </span>
+              return (
+                <div className="p-3 rounded-md bg-[#18191a] border border-[#3c4043] space-y-2.5">
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <select
+                      value={selectedTaskId}
+                      onChange={(e) => setSelectedTaskId(e.target.value)}
+                      className="flex-1 bg-[#202124] border border-[#3c4043] rounded-md px-3 py-2 text-xs text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8] cursor-pointer"
+                    >
+                      {AI_TASK_PRESETS.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={runSelectedPreset}
+                      className="px-4 py-2 rounded-md bg-[#8ab4f8] hover:bg-[#aecbfa] disabled:opacity-50 text-[#202124] font-semibold text-xs flex items-center justify-center gap-1.5 shrink-0 cursor-pointer transition-colors"
+                    >
+                      <Sparkles
+                        className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`}
+                      />
+                      <span>
+                        {loading ? 'AI đang xử lý...' : 'Chạy tác vụ AI'}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] text-[#9aa0a6] leading-snug">
+                    {activePreset.description}
+                  </div>
+
+                  {activePreset.id === 'refactor_active_cell' && (
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[#292a2d] text-[11px]">
+                      <span className="font-mono text-[#8ab4f8] truncate">
+                        Cell đang chọn:{' '}
+                        {activeCell ? `"${activeCell.title}"` : 'Chưa chọn cell nào'}
+                      </span>
+                      {activeCell && (
+                        <label className="flex items-center gap-1.5 text-[#e8eaed] cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={replaceActiveCell}
+                            onChange={(e) => setReplaceActiveCell(e.target.checked)}
+                            className="accent-[#8ab4f8]"
+                          />
+                          <span>Ghi đè trực tiếp vào cell này</span>
+                        </label>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="text-[10px] text-[#9aa0a6] mt-1 leading-snug">
-                  {lastErrorText
-                    ? 'Đọc lỗi cell gần nhất và sinh code khắc phục.'
-                    : 'Kiểm tra leakage, outlier & gợi ý tăng điểm CV.'}
-                </div>
-              </button>
-            </div>
+              );
+            })()}
 
             {loading && (
               <div className="p-2.5 rounded-md bg-[#8ab4f8]/10 border border-[#8ab4f8]/40 text-[#8ab4f8] text-[11px] font-mono flex items-center gap-2">
