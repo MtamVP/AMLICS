@@ -12,21 +12,17 @@ export function generateCell1DataLoad(config: PipelineConfig): string {
 
   let loadBlock = '';
   if (config.datasetSource === 'upload' && config.uploadedFileName) {
-    loadBlock = `# Đọc dữ liệu từ file CSV người dùng đã tải lên
-DATASET_NAME = '${config.uploadedFileName}'
+    loadBlock = `DATASET_NAME = '${config.uploadedFileName}'
 csv_path = f'/tmp/{DATASET_NAME}' if os.path.exists(f'/tmp/{DATASET_NAME}') else DATASET_NAME
 df = pd.read_csv(csv_path)`;
   } else if (config.datasetSource === 'cloud_url' && config.cloudDatasetUrl.trim()) {
-    loadBlock = `# Tải trực tiếp Dataset từ URL / Kaggle / Đường dẫn Colab
-DATASET_NAME = '${config.cloudDatasetUrl.trim().split('/').pop() || 'cloud_dataset.csv'}'
+    loadBlock = `DATASET_NAME = '${config.cloudDatasetUrl.trim().split('/').pop() || 'cloud_dataset.csv'}'
 df = pd.read_csv('${config.cloudDatasetUrl.trim()}')`;
   } else {
     loadBlock = sample.pythonGeneratorCode;
   }
 
-  return `# ==============================================================================
-# [CELL 1] NẠP DỮ LIỆU & ĐỒNG BỘ DATA PROFILE (SCHEMA DISCOVERY)
-# ==============================================================================
+  return `# [1] Load Dataset & Sync Schema Profile
 import os
 import json
 import time
@@ -39,14 +35,14 @@ warnings.filterwarnings('ignore')
 
 ${loadBlock}
 
-print(f"✅ Đã nạp Dataset: {DATASET_NAME}")
-print(f"📊 Kích thước: {df.shape[0]:,} dòng × {df.shape[1]} cột")
-print(f"🎯 Cột mục tiêu (Target): '${config.targetColumn}' | Bài toán: ${config.taskType.toUpperCase()}")
-print("\\n--- Tỷ lệ Missing Values (%) ở các cột có dữ liệu khuyết ---")
-missing_s = (df.isna().sum() / len(df) * 100).round(2)
-print(missing_s[missing_s > 0].to_string() if (missing_s > 0).any() else "Không có giá trị khuyết (0% NaN)")
+print(f"Dataset : {DATASET_NAME} ({df.shape[0]:,} rows, {df.shape[1]} cols)")
+print(f"Target  : '{config.targetColumn}' | Task: ${config.taskType}")
 
-# Tự động gửi gói JSON Data Profile nhẹ về giao diện Web Studio
+missing_s = (df.isna().sum() / len(df) * 100).round(2)
+missing_cols = missing_s[missing_s > 0]
+if len(missing_cols) > 0:
+    print("Missing (%):", missing_cols.to_dict())
+
 if '_emit_data_profile' in globals():
     _emit_data_profile(df, DATASET_NAME)
 `;
@@ -54,8 +50,14 @@ if '_emit_data_profile' in globals():
 
 export function generateCell2Preprocess(config: PipelineConfig): string {
   const numImputerMap: Record<string, string> = {
-    median: "SimpleImputer(strategy='median', add_indicator=" + (config.addMissingIndicator ? 'True' : 'False') + ')',
-    mean: "SimpleImputer(strategy='mean', add_indicator=" + (config.addMissingIndicator ? 'True' : 'False') + ')',
+    median:
+      "SimpleImputer(strategy='median', add_indicator=" +
+      (config.addMissingIndicator ? 'True' : 'False') +
+      ')',
+    mean:
+      "SimpleImputer(strategy='mean', add_indicator=" +
+      (config.addMissingIndicator ? 'True' : 'False') +
+      ')',
     most_frequent: "SimpleImputer(strategy='most_frequent')",
     constant_zero: "SimpleImputer(strategy='constant', fill_value=0)",
   };
@@ -77,11 +79,7 @@ export function generateCell2Preprocess(config: PipelineConfig): string {
       ? `OneHotEncoder(handle_unknown='ignore', sparse_output=False, max_categories=${config.maxOneHotCategories})`
       : `OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)`;
 
-  return `# ==============================================================================
-# [CELL 2] THIẾT KẾ ANTI-LEAKAGE PREPROCESSING (COLUMNTRANSFORMER)
-# 💡 Mọi phép tính (Median/Mean Imputation, Scaling, One-Hot) được đóng gói trong
-#    Pipeline để CHỈ fit() trên tập Train của từng Fold, chống tuyệt đối Data Leakage!
-# ==============================================================================
+  return `# [2] Anti-Leakage Preprocessing (ColumnTransformer)
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
@@ -90,14 +88,12 @@ from sklearn.preprocessing import StandardScaler, RobustScaler, MinMaxScaler, On
 TARGET_COL = '${config.targetColumn}'
 DROP_COLS = ${formatPyList(config.dropColumns)}
 
-# Tự động lọc các cột hợp lệ hiện có trong DataFrame df
 requested_num_cols = ${formatPyList(config.numericColumns)}
 requested_cat_cols = ${formatPyList(config.categoricalColumns)}
 
 numeric_features = [c for c in requested_num_cols if c in df.columns and c != TARGET_COL and c not in DROP_COLS]
 categorical_features = [c for c in requested_cat_cols if c in df.columns and c != TARGET_COL and c not in DROP_COLS]
 
-# Nếu danh sách cột trống (VD: vừa đổi bộ dữ liệu mới), tự động suy luận thông minh
 if not numeric_features and not categorical_features:
     feature_candidates = [c for c in df.columns if c != TARGET_COL and c not in DROP_COLS]
     numeric_features = [c for c in feature_candidates if pd.api.types.is_numeric_dtype(df[c])]
@@ -122,10 +118,11 @@ preprocessor = ColumnTransformer(
     verbose_feature_names_out=True
 )
 
-print(f"🛡️ Đã khởi tạo Anti-Leakage ColumnTransformer:")
-print(f"   • Nhánh biến số (Numeric - {len(numeric_features)} cột): {numeric_features}")
-print(f"   • Nhánh phân loại (Categorical - {len(categorical_features)} cột): {categorical_features}")
-print(f"   • Cột loại bỏ (Dropped): {DROP_COLS}")
+print(f"ColumnTransformer configured:")
+print(f"  Numeric ({len(numeric_features)})     : {numeric_features}")
+print(f"  Categorical ({len(categorical_features)}) : {categorical_features}")
+if DROP_COLS:
+    print(f"  Dropped ({len(DROP_COLS)})     : {DROP_COLS}")
 `;
 }
 
@@ -134,20 +131,16 @@ export function generateCell3SplitCV(config: PipelineConfig): string {
   const stratifyExpr = isClass && config.stratifiedCV ? 'y' : 'None';
   const cvClass = isClass && config.stratifiedCV ? 'StratifiedKFold' : 'KFold';
 
-  return `# ==============================================================================
-# [CELL 3] PHÂN CHIA TRAIN / HOLDOUT TEST & THIẾT LẬP CROSS-VALIDATION
-# ==============================================================================
+  return `# [3] Train / Holdout Split & Cross-Validation Setup
 from sklearn.model_selection import train_test_split, StratifiedKFold, KFold
 
-# Loại bỏ các dòng bị khuyết ở biến mục tiêu (Target)
 clean_df = df.dropna(subset=[TARGET_COL]).copy()
 X = clean_df[numeric_features + categorical_features].copy()
 y = clean_df[TARGET_COL].copy()
 
 ${
   isClass
-    ? `# Đảm bảo nhãn phân loại ở dạng số nguyên (0, 1, ...)
-if not pd.api.types.is_numeric_dtype(y):
+    ? `if not pd.api.types.is_numeric_dtype(y):
     y = pd.factorize(y)[0]
 else:
     y = y.astype(int)`
@@ -167,14 +160,11 @@ cv_splitter = ${cvClass}(
     random_state=${config.hyperparameters.randomState}
 )
 
-print(f"✂️ Đã chia dữ liệu chuẩn chống rò rỉ:")
-print(f"   • Tập Train: {X_train.shape[0]:,} mẫu | Tập Holdout Test: {X_test.shape[0]:,} mẫu")
-print(f"   • Chiến lược Cross-Validation: ${cvClass}(n_splits=${config.cvFolds})")
+print(f"Split: Train={X_train.shape[0]:,} | Test={X_test.shape[0]:,} | CV=${cvClass}(n_splits=${config.cvFolds})")
 ${
   isClass
-    ? `class_counts = pd.Series(y_train).value_counts().to_dict()
-print(f"   • Phân phối nhãn trên tập Train: {class_counts}")`
-    : `print(f"   • Trung bình Target trên tập Train: {y_train.mean():.3f} ± {y_train.std():.3f}")`
+    ? `print("Train class distribution:", pd.Series(y_train).value_counts().to_dict())`
+    : `print(f"Train target mean={y_train.mean():.3f}, std={y_train.std():.3f}")`
 }
 `;
 }
@@ -198,7 +188,7 @@ estimator = HistGradientBoostingClassifier(
     class_weight=${useBalancedWeight ? "'balanced'" : 'None'},
     random_state=${hp.randomState}
 )
-ACTIVE_MODEL_NAME = "HistGradientBoostingClassifier"`
+ACTIVE_MODEL_NAME = "HistGradientBoosting"`
         : `from sklearn.ensemble import HistGradientBoostingRegressor
 estimator = HistGradientBoostingRegressor(
     max_iter=${hp.nEstimators},
@@ -208,7 +198,7 @@ estimator = HistGradientBoostingRegressor(
     l2_regularization=${hp.l2Regularization},
     random_state=${hp.randomState}
 )
-ACTIVE_MODEL_NAME = "HistGradientBoostingRegressor"`;
+ACTIVE_MODEL_NAME = "HistGradientBoosting"`;
       break;
 
     case 'RandomForest':
@@ -222,7 +212,7 @@ estimator = RandomForestClassifier(
     n_jobs=-1,
     random_state=${hp.randomState}
 )
-ACTIVE_MODEL_NAME = "RandomForestClassifier"`
+ACTIVE_MODEL_NAME = "RandomForest"`
         : `from sklearn.ensemble import RandomForestRegressor
 estimator = RandomForestRegressor(
     n_estimators=${hp.nEstimators},
@@ -231,7 +221,7 @@ estimator = RandomForestRegressor(
     n_jobs=-1,
     random_state=${hp.randomState}
 )
-ACTIVE_MODEL_NAME = "RandomForestRegressor"`;
+ACTIVE_MODEL_NAME = "RandomForest"`;
       break;
 
     case 'ExtraTrees':
@@ -245,7 +235,7 @@ estimator = ExtraTreesClassifier(
     n_jobs=-1,
     random_state=${hp.randomState}
 )
-ACTIVE_MODEL_NAME = "ExtraTreesClassifier"`
+ACTIVE_MODEL_NAME = "ExtraTrees"`
         : `from sklearn.ensemble import ExtraTreesRegressor
 estimator = ExtraTreesRegressor(
     n_estimators=${hp.nEstimators},
@@ -254,7 +244,7 @@ estimator = ExtraTreesRegressor(
     n_jobs=-1,
     random_state=${hp.randomState}
 )
-ACTIVE_MODEL_NAME = "ExtraTreesRegressor"`;
+ACTIVE_MODEL_NAME = "ExtraTrees"`;
       break;
 
     case 'LinearModel':
@@ -272,7 +262,7 @@ estimator = Ridge(
     alpha=${hp.l2Regularization},
     random_state=${hp.randomState}
 )
-ACTIVE_MODEL_NAME = "RidgeRegression"`;
+ACTIVE_MODEL_NAME = "Ridge"`;
       break;
 
     case 'MLPNeuralNet':
@@ -286,7 +276,7 @@ estimator = MLPClassifier(
     early_stopping=True,
     random_state=${hp.randomState}
 )
-ACTIVE_MODEL_NAME = "MLPNeuralNetClassifier"`
+ACTIVE_MODEL_NAME = "MLPNeuralNet"`
         : `from sklearn.neural_network import MLPRegressor
 estimator = MLPRegressor(
     hidden_layer_sizes=(128, 64),
@@ -296,7 +286,7 @@ estimator = MLPRegressor(
     early_stopping=True,
     random_state=${hp.randomState}
 )
-ACTIVE_MODEL_NAME = "MLPNeuralNetRegressor"`;
+ACTIVE_MODEL_NAME = "MLPNeuralNet"`;
       break;
 
     case 'LightGBM':
@@ -314,10 +304,9 @@ ACTIVE_MODEL_NAME = "MLPNeuralNetRegressor"`;
         random_state=${hp.randomState},
         verbose=-1
     )
-    ACTIVE_MODEL_NAME = "LightGBMClassifier (Cloud Native)"
+    ACTIVE_MODEL_NAME = "LightGBM"
 except ImportError:
     from sklearn.ensemble import HistGradientBoostingClassifier
-    print("ℹ️ Đang chạy trên Browser Wasm -> dùng HistGradientBoosting (thuật toán LightGBM trong sklearn)")
     estimator = HistGradientBoostingClassifier(
         max_iter=${hp.nEstimators},
         learning_rate=${hp.learningRate},
@@ -326,7 +315,7 @@ except ImportError:
         class_weight=${useBalancedWeight ? "'balanced'" : 'None'},
         random_state=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "LightGBM (HistGB-Wasm)"`
+    ACTIVE_MODEL_NAME = "LightGBM (HistGB)"`
         : `try:
     from lightgbm import LGBMRegressor
     estimator = LGBMRegressor(
@@ -338,7 +327,7 @@ except ImportError:
         random_state=${hp.randomState},
         verbose=-1
     )
-    ACTIVE_MODEL_NAME = "LightGBMRegressor (Cloud Native)"
+    ACTIVE_MODEL_NAME = "LightGBM"
 except ImportError:
     from sklearn.ensemble import HistGradientBoostingRegressor
     estimator = HistGradientBoostingRegressor(
@@ -348,7 +337,7 @@ except ImportError:
         l2_regularization=${hp.l2Regularization},
         random_state=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "LightGBM (HistGB-Wasm)"`;
+    ACTIVE_MODEL_NAME = "LightGBM (HistGB)"`;
       break;
 
     case 'XGBoost':
@@ -364,10 +353,9 @@ except ImportError:
         eval_metric='logloss',
         random_state=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "XGBoostClassifier"
+    ACTIVE_MODEL_NAME = "XGBoost"
 except ImportError:
     from sklearn.ensemble import HistGradientBoostingClassifier
-    print("ℹ️ XGBoost C++ yêu cầu Cloud Runtime (Colab/Kaggle) -> tự động chuyển sang HistGradientBoosting trên Wasm")
     estimator = HistGradientBoostingClassifier(
         max_iter=${hp.nEstimators},
         learning_rate=${hp.learningRate},
@@ -375,7 +363,7 @@ except ImportError:
         l2_regularization=${hp.l2Regularization},
         random_state=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "XGBoost (HistGB-Fallback)"`
+    ACTIVE_MODEL_NAME = "XGBoost (HistGB)"`
         : `try:
     from xgboost import XGBRegressor
     estimator = XGBRegressor(
@@ -386,7 +374,7 @@ except ImportError:
         reg_lambda=${hp.l2Regularization},
         random_state=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "XGBoostRegressor"
+    ACTIVE_MODEL_NAME = "XGBoost"
 except ImportError:
     from sklearn.ensemble import HistGradientBoostingRegressor
     estimator = HistGradientBoostingRegressor(
@@ -396,7 +384,7 @@ except ImportError:
         l2_regularization=${hp.l2Regularization},
         random_state=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "XGBoost (HistGB-Fallback)"`;
+    ACTIVE_MODEL_NAME = "XGBoost (HistGB)"`;
       break;
 
     case 'CatBoost':
@@ -411,10 +399,9 @@ except ImportError:
         verbose=0,
         random_seed=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "CatBoostClassifier"
+    ACTIVE_MODEL_NAME = "CatBoost"
 except ImportError:
     from sklearn.ensemble import HistGradientBoostingClassifier
-    print("ℹ️ CatBoost yêu cầu Cloud Runtime (Colab/Kaggle) -> tự động dùng HistGradientBoosting trên Wasm")
     estimator = HistGradientBoostingClassifier(
         max_iter=${hp.nEstimators},
         learning_rate=${hp.learningRate},
@@ -422,7 +409,7 @@ except ImportError:
         l2_regularization=${hp.l2Regularization},
         random_state=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "CatBoost (HistGB-Fallback)"`
+    ACTIVE_MODEL_NAME = "CatBoost (HistGB)"`
         : `try:
     from catboost import CatBoostRegressor
     estimator = CatBoostRegressor(
@@ -433,7 +420,7 @@ except ImportError:
         verbose=0,
         random_seed=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "CatBoostRegressor"
+    ACTIVE_MODEL_NAME = "CatBoost"
 except ImportError:
     from sklearn.ensemble import HistGradientBoostingRegressor
     estimator = HistGradientBoostingRegressor(
@@ -443,14 +430,13 @@ except ImportError:
         l2_regularization=${hp.l2Regularization},
         random_state=${hp.randomState}
     )
-    ACTIVE_MODEL_NAME = "CatBoost (HistGB-Fallback)"`;
+    ACTIVE_MODEL_NAME = "CatBoost (HistGB)"`;
       break;
   }
 
   const oversampleBlock =
     isClass && config.imbalanceStrategy === 'random_oversample'
-      ? `# Cân bằng lớp thiểu số CHỈ trên tập X_train, y_train (Không chạm vào tập Test!)
-from sklearn.utils import resample
+      ? `from sklearn.utils import resample
 train_combined = X_train.copy()
 train_combined['__target__'] = y_train.values
 maj_class = train_combined['__target__'].mode()[0]
@@ -460,12 +446,10 @@ df_min_upsampled = resample(df_min, replace=True, n_samples=len(df_maj), random_
 train_balanced = pd.concat([df_maj, df_min_upsampled]).sample(frac=1.0, random_state=${hp.randomState})
 X_train_fit = train_balanced.drop(columns=['__target__'])
 y_train_fit = train_balanced['__target__']
-print(f"⚖️ Random Oversampling (Train Only): Tăng mẫu từ {len(X_train)} -> {len(X_train_fit)} mẫu cân bằng")`
+print(f"Oversampled train set: {len(X_train)} -> {len(X_train_fit)} rows")`
       : `X_train_fit, y_train_fit = X_train, y_train`;
 
-  return `# ==============================================================================
-# [CELL 4] KHỞI TẠO PIPELINE HOÀN CHỈNH & HUẤN LUYỆN K-FOLD CROSS-VALIDATION
-# ==============================================================================
+  return `# [4] Pipeline Training & Cross-Validation
 from sklearn.base import clone
 from sklearn.metrics import roc_auc_score, f1_score, root_mean_squared_error, r2_score
 
@@ -478,7 +462,7 @@ full_pipeline = Pipeline(steps=[
 
 ${oversampleBlock}
 
-print(f"🚀 Bắt đầu huấn luyện {ACTIVE_MODEL_NAME} với ${config.cvFolds}-Fold Cross-Validation...")
+print(f"Training {ACTIVE_MODEL_NAME} ({${config.cvFolds}}-Fold CV)...")
 cv_scores = []
 train_start_t = time.perf_counter()
 
@@ -505,16 +489,15 @@ ${
     metric_label = "RMSE"`
 }
     cv_scores.append(float(score))
-    print(f"   • [Fold {fold_idx}/${config.cvFolds}] {metric_label}: {score:.4f} ({(time.perf_counter() - f_t0)*1000:.0f} ms)")
+    print(f"  Fold {fold_idx}/${config.cvFolds} | {metric_label}: {score:.4f} ({(time.perf_counter() - f_t0)*1000:.0f} ms)")
 
 cv_mean = float(np.mean(cv_scores))
 cv_std = float(np.std(cv_scores))
-print(f"📊 Trung bình CV ({metric_label}): {cv_mean:.4f} ± {cv_std:.4f}")
+print(f"CV {metric_label}: {cv_mean:.4f} +/- {cv_std:.4f}")
 
-# Fit mô hình cuối cùng trên toàn bộ tập Train
 full_pipeline.fit(X_train_fit, y_train_fit)
 total_train_ms = int((time.perf_counter() - train_start_t) * 1000)
-print(f"✅ Huấn luyện hoàn tất full_pipeline trong {total_train_ms} ms!")
+print(f"Fitted full_pipeline in {total_train_ms} ms.")
 `;
 }
 
@@ -522,9 +505,7 @@ export function generateCell5Evaluate(config: PipelineConfig): string {
   const isClass = config.taskType === 'classification';
 
   if (isClass) {
-    return `# ==============================================================================
-# [CELL 5] ĐÁNH GIÁ TRÊN TẬP HOLDOUT TEST, VẼ BIỂU ĐỒ & GHI LEADERBOARD
-# ==============================================================================
+    return `# [5] Holdout Evaluation & Experiment Logging
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, roc_curve, confusion_matrix
@@ -553,7 +534,6 @@ roc_points = [
 if roc_points[-1]["fpr"] < 1.0:
     roc_points.append({"fpr": 1.0, "tpr": 1.0})
 
-# Trích xuất mức độ quan trọng của các biến (Feature Importance)
 perm_res = permutation_importance(
     full_pipeline, X_test, y_test, n_repeats=5, random_state=42, scoring='roc_auc'
 )
@@ -568,56 +548,45 @@ feature_importance_list = [
     for k, v in fi_pairs
 ]
 
-print("=" * 64)
-print(f"🏆 KẾT QUẢ ĐÁNH GIÁ HOLDOUT TEST — {ACTIVE_MODEL_NAME}")
-print("=" * 64)
-print(f"   • ROC-AUC   : {auc_val:.4f}   (CV Mean: {cv_mean:.4f} ± {cv_std:.4f})")
-print(f"   • F1-Score  : {f1:.4f}")
-print(f"   • Accuracy  : {acc:.4f}")
-print(f"   • Precision : {prec:.4f}   | Recall: {rec:.4f}")
-print("=" * 64)
+print(f"Holdout Results ({ACTIVE_MODEL_NAME}):")
+print(f"  ROC-AUC   : {auc_val:.4f} (CV: {cv_mean:.4f} +/- {cv_std:.4f})")
+print(f"  F1-Score  : {f1:.4f} | Accuracy : {acc:.4f}")
+print(f"  Precision : {prec:.4f} | Recall   : {rec:.4f}")
 
-# Vẽ bộ 3 biểu đồ chẩn đoán mô hình (Dark Studio Theme)
 plt.style.use('dark_background')
-fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.2), dpi=120)
-fig.patch.set_facecolor('#0f172a')
+fig, axes = plt.subplots(1, 3, figsize=(13.5, 3.8), dpi=115)
+fig.patch.set_facecolor('#202124')
 
-# 1. Đường cong ROC
-axes[0].set_facecolor('#1e293b')
-axes[0].plot(fpr_arr, tpr_arr, color='#6366f1', lw=2.5, label=f'AUC = {auc_val:.4f}')
-axes[0].plot([0, 1], [0, 1], color='#64748b', linestyle='--', lw=1.2)
-axes[0].fill_between(fpr_arr, tpr_arr, alpha=0.18, color='#6366f1')
-axes[0].set_title('ROC Curve (Holdout Test)', fontsize=11, fontweight='bold', color='#f8fafc')
-axes[0].set_xlabel('False Positive Rate')
-axes[0].set_ylabel('True Positive Rate')
-axes[0].legend(loc='lower right')
-axes[0].grid(alpha=0.15)
+axes[0].set_facecolor('#18191a')
+axes[0].plot(fpr_arr, tpr_arr, color='#8ab4f8', lw=2, label=f'AUC = {auc_val:.4f}')
+axes[0].plot([0, 1], [0, 1], color='#5f6368', linestyle='--', lw=1)
+axes[0].set_title('ROC Curve', fontsize=10, color='#e8eaed')
+axes[0].set_xlabel('FPR', fontsize=9)
+axes[0].set_ylabel('TPR', fontsize=9)
+axes[0].legend(loc='lower right', fontsize=8)
+axes[0].grid(alpha=0.12)
 
-# 2. Ma trận nhầm lẫn (Confusion Matrix)
-axes[1].set_facecolor('#1e293b')
+axes[1].set_facecolor('#18191a')
 cm_np = np.array(cm)
-im = axes[1].imshow(cm_np, cmap='Blues')
-axes[1].set_title('Confusion Matrix', fontsize=11, fontweight='bold', color='#f8fafc')
-axes[1].set_xlabel('Predicted Label')
-axes[1].set_ylabel('Actual Label')
+axes[1].imshow(cm_np, cmap='Blues')
+axes[1].set_title('Confusion Matrix', fontsize=10, color='#e8eaed')
+axes[1].set_xlabel('Predicted', fontsize=9)
+axes[1].set_ylabel('Actual', fontsize=9)
 axes[1].set_xticks([0, 1])
 axes[1].set_yticks([0, 1])
 for i in range(cm_np.shape[0]):
     for j in range(cm_np.shape[1]):
-        axes[1].text(j, i, f"{cm_np[i, j]}", ha="center", va="center", color="white", fontsize=12, fontweight="bold")
+        axes[1].text(j, i, f"{cm_np[i, j]}", ha="center", va="center", color="white", fontsize=11)
 
-# 3. Top Feature Importances
-axes[2].set_facecolor('#1e293b')
+axes[2].set_facecolor('#18191a')
 top_names = [x['feature'] for x in reversed(feature_importance_list[:8])]
 top_vals = [x['importance'] for x in reversed(feature_importance_list[:8])]
-axes[2].barh(top_names, top_vals, color='#10b981', height=0.6)
-axes[2].set_title('Top Permutation Importance', fontsize=11, fontweight='bold', color='#f8fafc')
-axes[2].set_xlabel('Mean AUC Drop')
-axes[2].grid(axis='x', alpha=0.15)
+axes[2].barh(top_names, top_vals, color='#8ab4f8', height=0.55)
+axes[2].set_title('Permutation Importance', fontsize=10, color='#e8eaed')
+axes[2].grid(axis='x', alpha=0.12)
 
 plt.tight_layout()
 
-# Đóng gói kết quả để tự động lưu vào Experiment Leaderboard
 _automl_experiment_result = {
     "model_name": ACTIVE_MODEL_NAME,
     "task_type": "classification",
@@ -637,9 +606,7 @@ _automl_experiment_result = {
 `;
   }
 
-  return `# ==============================================================================
-# [CELL 5] ĐÁNH GIÁ HỒI QUY (REGRESSION METRICS), BIỂU ĐỒ & LEADERBOARD
-# ==============================================================================
+  return `# [5] Holdout Regression Evaluation & Experiment Logging
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
 from sklearn.inspection import permutation_importance
 
@@ -662,33 +629,27 @@ feature_importance_list = [
     for k, v in fi_pairs
 ]
 
-print("=" * 64)
-print(f"🏆 KẾT QUẢ ĐÁNH GIÁ REGRESSION — {ACTIVE_MODEL_NAME}")
-print("=" * 64)
-print(f"   • RMSE (Sai số căn bậc 2) : {rmse_val:.4f} (CV Mean: {cv_mean:.4f})")
-print(f"   • MAE  (Sai số tuyệt đối) : {mae_val:.4f}")
-print(f"   • R² Score                : {r2_val:.4f}")
-print("=" * 64)
+print(f"Holdout Results ({ACTIVE_MODEL_NAME}):")
+print(f"  RMSE : {rmse_val:.4f} (CV: {cv_mean:.4f})")
+print(f"  MAE  : {mae_val:.4f} | R2 : {r2_val:.4f}")
 
 plt.style.use('dark_background')
-fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.2), dpi=120)
-fig.patch.set_facecolor('#0f172a')
+fig, axes = plt.subplots(1, 2, figsize=(10.5, 3.8), dpi=115)
+fig.patch.set_facecolor('#202124')
 
-axes[0].set_facecolor('#1e293b')
-axes[0].scatter(y_test, y_pred, alpha=0.65, color='#6366f1', edgecolors='none', s=32)
+axes[0].set_facecolor('#18191a')
+axes[0].scatter(y_test, y_pred, alpha=0.65, color='#8ab4f8', s=24)
 min_v, max_v = float(min(y_test.min(), y_pred.min())), float(max(y_test.max(), y_pred.max()))
-axes[0].plot([min_v, max_v], [min_v, max_v], '--', color='#f43f5e', lw=2)
-axes[0].set_title(f'Actual vs Predicted (R² = {r2_val:.3f})', fontsize=11, fontweight='bold')
-axes[0].set_xlabel('Actual Target')
-axes[0].set_ylabel('Predicted Target')
-axes[0].grid(alpha=0.15)
+axes[0].plot([min_v, max_v], [min_v, max_v], '--', color='#9aa0a6', lw=1.2)
+axes[0].set_title(f'Actual vs Predicted (R2 = {r2_val:.3f})', fontsize=10)
+axes[0].grid(alpha=0.12)
 
-axes[1].set_facecolor('#1e293b')
+axes[1].set_facecolor('#18191a')
 top_names = [x['feature'] for x in reversed(feature_importance_list[:8])]
 top_vals = [x['importance'] for x in reversed(feature_importance_list[:8])]
-axes[1].barh(top_names, top_vals, color='#10b981', height=0.6)
-axes[1].set_title('Top Permutation Importance (R² Drop)', fontsize=11, fontweight='bold')
-axes[1].grid(axis='x', alpha=0.15)
+axes[1].barh(top_names, top_vals, color='#8ab4f8', height=0.55)
+axes[1].set_title('Permutation Importance', fontsize=10)
+axes[1].grid(axis='x', alpha=0.12)
 
 plt.tight_layout()
 
@@ -723,40 +684,40 @@ export function buildAllPipelineCells(
       id: 'cell_01_load',
       order: 1,
       stepType: 'data_load',
-      title: '01. Data Ingestion & Schema Profiling',
-      subtitle: 'Nạp dữ liệu & tự động trích xuất Data Profile JSON',
+      title: '1. Load Dataset & Profile',
+      subtitle: 'Read DataFrame and sync schema metadata',
       code: generateCell1DataLoad(config),
     },
     {
       id: 'cell_02_preprocess',
       order: 2,
       stepType: 'preprocess',
-      title: '02. Anti-Leakage ColumnTransformer',
-      subtitle: 'Đóng gói Imputer, Scaler & Encoder chống rò rỉ dữ liệu',
+      title: '2. ColumnTransformer Pipeline',
+      subtitle: 'Numeric & categorical preprocessing without data leakage',
       code: generateCell2Preprocess(config),
     },
     {
       id: 'cell_03_split',
       order: 3,
       stepType: 'split_cv',
-      title: '03. Stratified Split & Cross-Validation',
-      subtitle: 'Tách tập Holdout Test & cấu hình K-Fold CV',
+      title: '3. Train / Holdout Split & CV',
+      subtitle: 'Partition dataset and configure K-Fold cross-validation',
       code: generateCell3SplitCV(config),
     },
     {
       id: 'cell_04_train',
       order: 4,
       stepType: 'model_train',
-      title: `04. Pipeline Training (${config.modelFamily})`,
-      subtitle: 'Huấn luyện Pipeline qua từng Fold & xử lý mất cân bằng mẫu',
+      title: `4. Train Model (${config.modelFamily})`,
+      subtitle: 'Fit pipeline across CV folds and full training set',
       code: generateCell4ModelTrain(config),
     },
     {
       id: 'cell_05_eval',
       order: 5,
       stepType: 'evaluate',
-      title: '05. Holdout Diagnostics & Leaderboard Sync',
-      subtitle: 'Đánh giá độc lập, vẽ biểu đồ ROC/CM/Importance & lưu Leaderboard',
+      title: '5. Evaluate & Log Experiment',
+      subtitle: 'Compute holdout metrics, plots, and record to leaderboard',
       code: generateCell5Evaluate(config),
     },
   ];
@@ -777,7 +738,6 @@ export function buildAllPipelineCells(
     }));
   }
 
-  // Giữ nguyên các cell đã bị khóa (Custom Locked) và các cell Custom do người dùng thêm
   const updatedStandardCells = templates.map((t) => {
     const prev = existingCells.find((c) => c.id === t.id || c.stepType === t.stepType);
     if (!prev) {
@@ -801,7 +761,6 @@ export function buildAllPipelineCells(
       title: t.title,
       subtitle: t.subtitle,
       generatedCode: t.code,
-      // Chỉ cập nhật currentCode nếu Cell KHÔNG bị khóa (isLocked === false)
       currentCode: prev.isLocked ? prev.currentCode : t.code,
     };
   });

@@ -1,19 +1,5 @@
 import React, { useState } from 'react';
 import {
-  Trophy,
-  Table2,
-  BarChart3,
-  Terminal,
-  RotateCcw,
-  Trash2,
-  Send,
-  Sparkles,
-  Award,
-  Clock,
-  Layers,
-  Eye,
-} from 'lucide-react';
-import {
   ResponsiveContainer,
   BarChart,
   Bar,
@@ -21,7 +7,6 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  Legend,
 } from 'recharts';
 import {
   CliLogEntry,
@@ -57,14 +42,13 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
   namespaceVars,
   onRunQuickCommand,
 }) => {
-  const [activeTab, setActiveTab] = useState<'leaderboard' | 'data' | 'diagnostics'>('leaderboard');
+  const [activeTab, setActiveTab] = useState<'leaderboard' | 'diagnostics' | 'data'>('leaderboard');
   const [quickCmd, setQuickCmd] = useState<string>('');
   const [cliExpanded, setCliExpanded] = useState<boolean>(true);
 
   const selectedExp =
     experiments.find((e) => e.id === selectedExpId) || experiments[0] || null;
 
-  // Sắp xếp bảng xếp hạng theo metric chính
   const sortedExperiments = [...experiments].sort((a, b) => {
     if (taskType === 'classification') {
       const scoreA = a.metrics.roc_auc ?? a.metrics.f1 ?? 0;
@@ -77,17 +61,14 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
     }
   });
 
-  // Dữ liệu biểu đồ so sánh các lần chạy trên Recharts
   const comparisonChartData = [...experiments]
     .slice()
     .reverse()
     .map((exp) => ({
-      name: `#${exp.runNumber} ${exp.modelFamily.slice(0, 8)}`,
+      name: `#${exp.runNumber} ${exp.modelFamily.slice(0, 7)}`,
       ROC_AUC: exp.metrics.roc_auc ?? 0,
       F1: exp.metrics.f1 ?? 0,
-      Accuracy: exp.metrics.accuracy ?? 0,
       R2: exp.metrics.r2 ?? 0,
-      RMSE: exp.metrics.rmse ?? 0,
     }));
 
   const handleQuickSubmit = (e: React.FormEvent) => {
@@ -98,212 +79,187 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
   };
 
   return (
-    <aside className="w-full h-full bg-slate-900/85 border-l border-slate-800 flex flex-col overflow-hidden select-none">
-      {/* Top Studio Tabs */}
-      <div className="px-2.5 py-2 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-1 shrink-0">
-        <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 w-full">
-          <button
-            type="button"
-            onClick={() => setActiveTab('leaderboard')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-md text-xs font-semibold transition-all ${
-              activeTab === 'leaderboard'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Trophy className="w-3.5 h-3.5 text-amber-300" />
-            <span>Leaderboard ({experiments.length})</span>
-          </button>
+    <aside className="w-full h-full bg-[#202124] border-l border-[#3c4043] flex flex-col overflow-hidden select-none">
+      {/* Minimal Tab Strip */}
+      <div className="px-3 border-b border-[#3c4043] flex items-center gap-4 text-xs shrink-0">
+        <button
+          type="button"
+          onClick={() => setActiveTab('leaderboard')}
+          className={`py-2.5 border-b-2 transition-colors ${
+            activeTab === 'leaderboard'
+              ? 'border-[#8ab4f8] text-[#8ab4f8] font-medium'
+              : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
+          }`}
+        >
+          Leaderboard ({experiments.length})
+        </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('diagnostics')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-md text-xs font-semibold transition-all ${
-              activeTab === 'diagnostics'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <BarChart3 className="w-3.5 h-3.5 text-emerald-300" />
-            <span>Plots & SHAP</span>
-          </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('diagnostics')}
+          className={`py-2.5 border-b-2 transition-colors ${
+            activeTab === 'diagnostics'
+              ? 'border-[#8ab4f8] text-[#8ab4f8] font-medium'
+              : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
+          }`}
+        >
+          Plots & Importance
+        </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('data')}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-md text-xs font-semibold transition-all ${
-              activeTab === 'data'
-                ? 'bg-indigo-600 text-white shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Table2 className="w-3.5 h-3.5 text-sky-300" />
-            <span>Data Profile</span>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setActiveTab('data')}
+          className={`py-2.5 border-b-2 transition-colors ${
+            activeTab === 'data'
+              ? 'border-[#8ab4f8] text-[#8ab4f8] font-medium'
+              : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
+          }`}
+        >
+          Data Explorer
+        </button>
       </div>
 
-      {/* Upper Content Area */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 custom-scrollbar">
-        {/* ==================== TAB 1: EXPERIMENT LEADERBOARD ==================== */}
+      {/* Main Content Area */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#18191a] custom-scrollbar">
+        {/* ==================== TAB 1: LEADERBOARD ==================== */}
         {activeTab === 'leaderboard' && (
           <div className="space-y-3">
             {experiments.length === 0 ? (
-              <div className="p-6 rounded-xl bg-slate-950/60 border border-dashed border-slate-800 text-center space-y-2">
-                <Trophy className="w-8 h-8 text-amber-400/70 mx-auto" />
-                <h4 className="text-xs font-bold text-slate-200">
-                  Chưa có lần chạy thực nghiệm nào
-                </h4>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Hãy bấm nút <strong className="text-indigo-300">▶ Run Full Pipeline</strong> ở thanh trên cùng để huấn luyện mô hình và tự động xếp hạng kết quả vào Leaderboard!
+              <div className="p-5 rounded bg-[#202124] border border-[#3c4043] text-center space-y-1.5">
+                <div className="text-xs font-medium text-[#e8eaed]">
+                  No experiment runs recorded
+                </div>
+                <p className="text-[11px] text-[#9aa0a6]">
+                  Click <strong>Run all</strong> in the top toolbar to train the pipeline and log metrics here.
                 </p>
               </div>
             ) : (
               <>
-                {/* Recharts Multi-Run Comparison */}
-                <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
-                      So sánh hiệu năng giữa các lần chạy
+                <div className="p-3 rounded bg-[#202124] border border-[#3c4043] space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-medium text-[#e8eaed]">
+                      Metric Comparison
                     </span>
                     <button
                       type="button"
                       onClick={onClearExperiments}
-                      className="text-[10px] text-slate-500 hover:text-rose-400 flex items-center gap-1"
+                      className="text-[#9aa0a6] hover:text-[#f28b82]"
                     >
-                      <Trash2 className="w-3 h-3" /> Clear
+                      Clear history
                     </button>
                   </div>
-                  <div className="h-40 w-full">
+                  <div className="h-36 w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={comparisonChartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                        <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="#292a2d" />
+                        <XAxis dataKey="name" tick={{ fill: '#9aa0a6', fontSize: 10 }} />
                         <YAxis
                           domain={taskType === 'classification' ? [0.5, 1.0] : ['auto', 'auto']}
-                          tick={{ fill: '#94a3b8', fontSize: 10 }}
+                          tick={{ fill: '#9aa0a6', fontSize: 10 }}
                         />
                         <Tooltip
                           contentStyle={{
-                            backgroundColor: '#0f172a',
-                            borderColor: '#334155',
+                            backgroundColor: '#202124',
+                            borderColor: '#3c4043',
                             fontSize: '11px',
                           }}
                         />
-                        <Legend wrapperStyle={{ fontSize: '10px' }} />
                         {taskType === 'classification' ? (
                           <>
-                            <Bar dataKey="ROC_AUC" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                            <Bar dataKey="F1" fill="#10b981" radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="ROC_AUC" fill="#8ab4f8" />
+                            <Bar dataKey="F1" fill="#81c995" />
                           </>
                         ) : (
-                          <>
-                            <Bar dataKey="R2" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                          </>
+                          <Bar dataKey="R2" fill="#8ab4f8" />
                         )}
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
                 </div>
 
-                {/* Leaderboard Cards */}
+                {/* Clean Tabular Leaderboard Cards */}
                 <div className="space-y-2">
                   {sortedExperiments.map((exp, rankIdx) => {
-                    const isBest = rankIdx === 0;
                     const isSelected = selectedExp?.id === exp.id;
                     return (
                       <div
                         key={exp.id}
                         onClick={() => onSelectExperiment(exp.id)}
-                        className={`p-3 rounded-xl border transition-all cursor-pointer ${
+                        className={`p-2.5 rounded border transition-colors cursor-pointer bg-[#202124] ${
                           isSelected
-                            ? 'bg-indigo-950/30 border-indigo-500/70 shadow-md'
-                            : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                            ? 'border-[#8ab4f8]'
+                            : 'border-[#3c4043] hover:border-[#5f6368]'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                        <div className="flex items-center justify-between gap-2 mb-1.5 text-xs">
                           <div className="flex items-center gap-2 min-w-0">
-                            <span
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                isBest
-                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                                  : 'bg-slate-800 text-slate-400'
-                              }`}
-                            >
-                              {isBest ? '🏆 #1 Best' : `#${rankIdx + 1}`}
+                            <span className="font-mono text-[11px] text-[#9aa0a6]">
+                              #{rankIdx + 1}
                             </span>
-                            <span className="text-xs font-bold text-slate-100 truncate">
-                              Run #{exp.runNumber} • {exp.modelName}
+                            <span className="font-medium text-[#e8eaed] truncate">
+                              Run {exp.runNumber}: {exp.modelName}
                             </span>
                           </div>
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800 shrink-0">
-                            {exp.runtimeUsed}
+                          <span className="text-[10px] font-mono text-[#9aa0a6] shrink-0">
+                            {(exp.durationMs / 1000).toFixed(2)}s
                           </span>
                         </div>
 
-                        {/* Metrics Pills */}
                         {exp.taskType === 'classification' ? (
-                          <div className="grid grid-cols-4 gap-1.5 my-2 text-center">
-                            <div className="p-1.5 rounded bg-slate-900/90 border border-slate-800">
-                              <div className="text-[9px] text-slate-400">ROC-AUC</div>
-                              <div className="text-xs font-mono font-bold text-indigo-300">
+                          <div className="grid grid-cols-4 gap-1.5 my-1.5 text-center font-mono">
+                            <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
+                              <div className="text-[9px] text-[#9aa0a6]">AUC</div>
+                              <div className="text-xs text-[#8ab4f8]">
                                 {exp.metrics.roc_auc?.toFixed(4)}
                               </div>
                             </div>
-                            <div className="p-1.5 rounded bg-slate-900/90 border border-slate-800">
-                              <div className="text-[9px] text-slate-400">F1-Score</div>
-                              <div className="text-xs font-mono font-bold text-emerald-300">
+                            <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
+                              <div className="text-[9px] text-[#9aa0a6]">F1</div>
+                              <div className="text-xs text-[#e8eaed]">
                                 {exp.metrics.f1?.toFixed(4)}
                               </div>
                             </div>
-                            <div className="p-1.5 rounded bg-slate-900/90 border border-slate-800">
-                              <div className="text-[9px] text-slate-400">Accuracy</div>
-                              <div className="text-xs font-mono font-bold text-sky-300">
+                            <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
+                              <div className="text-[9px] text-[#9aa0a6]">Acc</div>
+                              <div className="text-xs text-[#e8eaed]">
                                 {exp.metrics.accuracy?.toFixed(4)}
                               </div>
                             </div>
-                            <div className="p-1.5 rounded bg-slate-900/90 border border-slate-800">
-                              <div className="text-[9px] text-slate-400">CV Mean</div>
-                              <div className="text-xs font-mono font-bold text-amber-300">
+                            <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
+                              <div className="text-[9px] text-[#9aa0a6]">CV</div>
+                              <div className="text-xs text-[#9aa0a6]">
                                 {exp.metrics.cv_mean?.toFixed(3)}
                               </div>
                             </div>
                           </div>
                         ) : (
-                          <div className="grid grid-cols-3 gap-1.5 my-2 text-center">
-                            <div className="p-1.5 rounded bg-slate-900/90 border border-slate-800">
-                              <div className="text-[9px] text-slate-400">RMSE</div>
-                              <div className="text-xs font-mono font-bold text-rose-300">
+                          <div className="grid grid-cols-3 gap-1.5 my-1.5 text-center font-mono">
+                            <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
+                              <div className="text-[9px] text-[#9aa0a6]">RMSE</div>
+                              <div className="text-xs text-[#e8eaed]">
                                 {exp.metrics.rmse?.toFixed(3)}
                               </div>
                             </div>
-                            <div className="p-1.5 rounded bg-slate-900/90 border border-slate-800">
-                              <div className="text-[9px] text-slate-400">MAE</div>
-                              <div className="text-xs font-mono font-bold text-amber-300">
+                            <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
+                              <div className="text-[9px] text-[#9aa0a6]">MAE</div>
+                              <div className="text-xs text-[#e8eaed]">
                                 {exp.metrics.mae?.toFixed(3)}
                               </div>
                             </div>
-                            <div className="p-1.5 rounded bg-slate-900/90 border border-slate-800">
-                              <div className="text-[9px] text-slate-400">R² Score</div>
-                              <div className="text-xs font-mono font-bold text-emerald-300">
+                            <div className="p-1 rounded bg-[#18191a] border border-[#292a2d]">
+                              <div className="text-[9px] text-[#9aa0a6]">R2</div>
+                              <div className="text-xs text-[#8ab4f8]">
                                 {exp.metrics.r2?.toFixed(4)}
                               </div>
                             </div>
                           </div>
                         )}
 
-                        {/* Hyperparams & Actions Footer */}
-                        <div className="flex items-center justify-between pt-1.5 border-t border-slate-800/80 text-[10px] text-slate-400">
-                          <span className="flex items-center gap-2 font-mono">
-                            <span>lr={exp.hyperparameters.learningRate}</span>
-                            <span>depth={exp.hyperparameters.maxDepth}</span>
-                            <span className="flex items-center gap-0.5">
-                              <Clock className="w-2.5 h-2.5" />
-                              {(exp.durationMs / 1000).toFixed(1)}s
-                            </span>
+                        <div className="flex items-center justify-between pt-1.5 border-t border-[#292a2d] text-[10px] font-mono text-[#9aa0a6]">
+                          <span>
+                            lr={exp.hyperparameters.learningRate} depth={exp.hyperparameters.maxDepth}
                           </span>
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-2">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -311,9 +267,9 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                                 onSelectExperiment(exp.id);
                                 setActiveTab('diagnostics');
                               }}
-                              className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 flex items-center gap-1"
+                              className="hover:text-[#e8eaed] underline"
                             >
-                              <Eye className="w-2.5 h-2.5" /> Plots
+                              Plots
                             </button>
                             <button
                               type="button"
@@ -321,10 +277,9 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                                 e.stopPropagation();
                                 onRestoreExperiment(exp);
                               }}
-                              className="px-2 py-0.5 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 flex items-center gap-1"
-                              title="Khôi phục toàn bộ cấu hình UI & Hyperparameters của lần chạy này"
+                              className="text-[#8ab4f8] hover:underline"
                             >
-                              <RotateCcw className="w-2.5 h-2.5" /> Restore
+                              Restore config
                             </button>
                           </div>
                         </div>
@@ -337,79 +292,71 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
           </div>
         )}
 
-        {/* ==================== TAB 2: DIAGNOSTICS & FEATURE IMPORTANCE ==================== */}
+        {/* ==================== TAB 2: DIAGNOSTICS ==================== */}
         {activeTab === 'diagnostics' && (
           <div className="space-y-3">
             {!selectedExp ? (
-              <div className="p-6 rounded-xl bg-slate-950/60 border border-dashed border-slate-800 text-center text-xs text-slate-400">
-                Chạy Pipeline trước để xem biểu đồ Feature Importance, ROC Curve và Confusion Matrix.
+              <div className="p-5 rounded bg-[#202124] border border-[#3c4043] text-center text-xs text-[#9aa0a6]">
+                Run the pipeline to inspect diagnostic plots and feature importances.
               </div>
             ) : (
               <>
-                <div className="p-2.5 rounded-lg bg-indigo-950/30 border border-indigo-500/30 flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                      <Award className="w-4 h-4 text-amber-400" />
-                      Run #{selectedExp.runNumber}: {selectedExp.modelName}
-                    </div>
-                    <div className="text-[10px] text-slate-400">
-                      Imputer: {selectedExp.preprocessingSummary.numericImputer} | Scaler:{' '}
-                      {selectedExp.preprocessingSummary.numericScaler} | Encoder:{' '}
-                      {selectedExp.preprocessingSummary.categoricalEncoder}
-                    </div>
+                <div className="p-2.5 rounded bg-[#202124] border border-[#3c4043] text-xs">
+                  <div className="font-medium text-[#e8eaed]">
+                    Run {selectedExp.runNumber}: {selectedExp.modelName}
+                  </div>
+                  <div className="text-[11px] font-mono text-[#9aa0a6] mt-0.5">
+                    imputer={selectedExp.preprocessingSummary.numericImputer} | scaler=
+                    {selectedExp.preprocessingSummary.numericScaler} | encoder=
+                    {selectedExp.preprocessingSummary.categoricalEncoder}
                   </div>
                 </div>
 
-                {/* Interactive Feature Importance BarChart */}
                 {selectedExp.featureImportance && selectedExp.featureImportance.length > 0 && (
-                  <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 space-y-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-300 block">
-                      Top Permutation Feature Importance
+                  <div className="p-3 rounded bg-[#202124] border border-[#3c4043] space-y-2">
+                    <span className="text-[11px] font-medium text-[#e8eaed] block">
+                      Permutation Importance
                     </span>
-                    <div className="h-48 w-full">
+                    <div className="h-44 w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
                           data={selectedExp.featureImportance.slice(0, 8)}
                           layout="vertical"
-                          margin={{ left: 15, right: 15 }}
+                          margin={{ left: 10, right: 10 }}
                         >
-                          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                          <XAxis type="number" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                          <CartesianGrid strokeDasharray="3 3" stroke="#292a2d" />
+                          <XAxis type="number" tick={{ fill: '#9aa0a6', fontSize: 10 }} />
                           <YAxis
                             type="category"
                             dataKey="feature"
                             width={105}
-                            tick={{ fill: '#e2e8f0', fontSize: 10 }}
+                            tick={{ fill: '#e8eaed', fontSize: 10 }}
                           />
                           <Tooltip
                             contentStyle={{
-                              backgroundColor: '#0f172a',
-                              borderColor: '#334155',
+                              backgroundColor: '#202124',
+                              borderColor: '#3c4043',
                               fontSize: '11px',
                             }}
                           />
-                          <Bar dataKey="importance" fill="#10b981" radius={[0, 4, 4, 0]} />
+                          <Bar dataKey="importance" fill="#8ab4f8" />
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
                   </div>
                 )}
 
-                {/* Matplotlib High-Res Diagnostic Figures */}
                 {selectedExp.figures && selectedExp.figures.length > 0 && (
                   <div className="space-y-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300 block">
-                      Biểu đồ chẩn đoán Matplotlib (ROC / CM / Residuals)
-                    </span>
                     {selectedExp.figures.map((fig, idx) => (
                       <div
                         key={idx}
-                        className="rounded-xl overflow-hidden border border-slate-800 bg-slate-950 p-1.5"
+                        className="rounded border border-[#3c4043] bg-[#202124] p-1"
                       >
                         <img
                           src={fig}
-                          alt={`Experiment Plot ${idx + 1}`}
-                          className="w-full h-auto rounded"
+                          alt={`Plot ${idx + 1}`}
+                          className="w-full h-auto"
                         />
                       </div>
                     ))}
@@ -420,104 +367,88 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
           </div>
         )}
 
-        {/* ==================== TAB 3: DATA PROFILE & HEAD(5) ==================== */}
+        {/* ==================== TAB 3: DATA EXPLORER ==================== */}
         {activeTab === 'data' && dataProfile && (
           <div className="space-y-3">
-            {/* Summary Banner */}
-            <div className="grid grid-cols-3 gap-2">
-              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-                <div className="text-[10px] text-slate-400">Số dòng (Rows)</div>
-                <div className="text-sm font-mono font-bold text-white">
+            <div className="grid grid-cols-3 gap-2 font-mono">
+              <div className="p-2 rounded bg-[#202124] border border-[#3c4043]">
+                <div className="text-[10px] text-[#9aa0a6]">Rows</div>
+                <div className="text-xs font-bold text-[#e8eaed]">
                   {dataProfile.shape[0].toLocaleString()}
                 </div>
               </div>
-              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-                <div className="text-[10px] text-slate-400">Số cột (Cols)</div>
-                <div className="text-sm font-mono font-bold text-indigo-300">
+              <div className="p-2 rounded bg-[#202124] border border-[#3c4043]">
+                <div className="text-[10px] text-[#9aa0a6]">Columns</div>
+                <div className="text-xs font-bold text-[#e8eaed]">
                   {dataProfile.shape[1]}
                 </div>
               </div>
-              <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800">
-                <div className="text-[10px] text-slate-400">Bộ nhớ (RAM)</div>
-                <div className="text-sm font-mono font-bold text-emerald-300">
+              <div className="p-2 rounded bg-[#202124] border border-[#3c4043]">
+                <div className="text-[10px] text-[#9aa0a6]">Memory</div>
+                <div className="text-xs font-bold text-[#e8eaed]">
                   {dataProfile.memory_mb} MB
                 </div>
               </div>
             </div>
 
-            {/* Schema & Missing % Table */}
-            <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
-              <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 text-[11px] font-bold text-slate-200 flex items-center justify-between">
-                <span>Schema & Tỷ lệ khuyết (Missing Values)</span>
-                <span className="font-mono text-[10px] text-slate-400">
+            <div className="rounded border border-[#3c4043] bg-[#202124] overflow-hidden">
+              <div className="px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] text-[11px] font-medium text-[#e8eaed] flex items-center justify-between">
+                <span>Column Schema</span>
+                <span className="font-mono text-[10px] text-[#9aa0a6]">
                   {dataProfile.dataset_name}
                 </span>
               </div>
-              <div className="max-h-56 overflow-y-auto divide-y divide-slate-800/60">
+              <div className="max-h-52 overflow-y-auto divide-y divide-[#292a2d]">
                 {dataProfile.columns.map((col) => (
                   <div
                     key={col.name}
-                    className="px-3 py-1.5 flex items-center justify-between gap-2 text-[11px]"
+                    className="px-3 py-1.5 flex items-center justify-between gap-2 text-[11px] font-mono"
                   >
                     <div className="min-w-0">
-                      <div className="font-mono font-semibold text-slate-200 truncate">
-                        {col.name}
-                      </div>
-                      <div className="text-[10px] text-slate-500">
+                      <div className="text-[#e8eaed] truncate">{col.name}</div>
+                      <div className="text-[10px] text-[#9aa0a6]">
                         {col.dtype} • {col.nunique} unique
-                        {col.mean !== undefined ? ` • μ=${col.mean}` : ''}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <div className="w-16 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full ${
-                            col.missing_pct > 0 ? 'bg-amber-400' : 'bg-emerald-500'
-                          }`}
-                          style={{ width: `${Math.min(col.missing_pct * 5, 100)}%` }}
-                        />
-                      </div>
-                      <span
-                        className={`font-mono text-[10px] w-12 text-right ${
-                          col.missing_pct > 0 ? 'text-amber-300 font-semibold' : 'text-slate-500'
-                        }`}
-                      >
-                        {col.missing_pct}%
-                      </span>
-                    </div>
+                    <span
+                      className={`text-[10px] shrink-0 ${
+                        col.missing_pct > 0 ? 'text-[#fdd663]' : 'text-[#9aa0a6]'
+                      }`}
+                    >
+                      {col.missing_pct}% NaN
+                    </span>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* df.head(5) Preview Table */}
-            <div className="rounded-xl border border-slate-800 bg-slate-950 overflow-hidden">
-              <div className="px-3 py-2 bg-slate-900 border-b border-slate-800 text-[11px] font-bold text-slate-200">
-                Xem trước 5 dòng đầu (df.head(5))
+            <div className="rounded border border-[#3c4043] bg-[#202124] overflow-hidden">
+              <div className="px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] text-[11px] font-medium text-[#e8eaed]">
+                df.head(5)
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-[11px] font-mono">
                   <thead>
-                    <tr className="bg-slate-900/70 border-b border-slate-800 text-slate-400">
+                    <tr className="bg-[#18191a] border-b border-[#3c4043] text-[#9aa0a6]">
                       {dataProfile.columns.map((c) => (
-                        <th key={c.name} className="px-2.5 py-1.5 whitespace-nowrap">
+                        <th key={c.name} className="px-2 py-1 whitespace-nowrap font-normal">
                           {c.name}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-800/50">
+                  <tbody className="divide-y divide-[#292a2d]">
                     {dataProfile.head.map((row, rIdx) => (
-                      <tr key={rIdx} className="hover:bg-slate-900/40">
+                      <tr key={rIdx}>
                         {dataProfile.columns.map((c) => {
                           const val = row[c.name];
                           return (
                             <td
                               key={c.name}
-                              className="px-2.5 py-1.5 whitespace-nowrap text-slate-300"
+                              className="px-2 py-1 whitespace-nowrap text-[#e8eaed]"
                             >
                               {val === null || val === undefined ? (
-                                <span className="text-amber-400 italic">NaN</span>
+                                <span className="text-[#9aa0a6] italic">NaN</span>
                               ) : (
                                 String(val)
                               )}
@@ -534,43 +465,36 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
         )}
       </div>
 
-      {/* ==================== BOTTOM LIVE STREAM CLI & REPL ==================== */}
-      <div className="border-t border-slate-800 bg-slate-950 flex flex-col shrink-0">
+      {/* ==================== CONSOLE / TERMINAL DRAWER ==================== */}
+      <div className="border-t border-[#3c4043] bg-[#18191a] flex flex-col shrink-0">
         <div
           onClick={() => setCliExpanded((p) => !p)}
-          className="px-3 py-1.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between cursor-pointer hover:bg-slate-800/60"
+          className="px-3 py-1.5 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between cursor-pointer text-xs"
         >
-          <div className="flex items-center gap-2">
-            <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-200">
-              Live Stream CLI & Kernel Variables
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onClearLogs();
-              }}
-              className="text-[10px] text-slate-400 hover:text-white px-1.5 py-0.5 rounded bg-slate-800"
-            >
-              Clear
-            </button>
-          </div>
+          <span className="font-medium text-[#e8eaed]">
+            Console & Kernel Variables
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClearLogs();
+            }}
+            className="text-[11px] text-[#9aa0a6] hover:text-[#e8eaed]"
+          >
+            Clear
+          </button>
         </div>
 
         {cliExpanded && (
           <>
-            {/* Active Kernel Namespace Variables */}
             {namespaceVars.length > 0 && (
-              <div className="px-3 py-1 bg-slate-900/50 border-b border-slate-800/80 flex items-center gap-1.5 overflow-x-auto text-[10px]">
-                <Layers className="w-3 h-3 text-indigo-400 shrink-0" />
-                <span className="text-slate-400 shrink-0">Memory:</span>
+              <div className="px-3 py-1 bg-[#202124] border-b border-[#292a2d] flex items-center gap-1.5 overflow-x-auto text-[10px] font-mono">
+                <span className="text-[#9aa0a6] shrink-0">vars:</span>
                 {namespaceVars.slice(0, 12).map((v) => (
                   <span
                     key={v}
-                    className="font-mono px-1.5 py-0.2 rounded bg-slate-800 text-emerald-300 border border-slate-700 shrink-0"
+                    className="px-1.5 py-0.2 rounded-sm bg-[#292a2d] text-[#e8eaed] shrink-0"
                   >
                     {v}
                   </span>
@@ -578,51 +502,40 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
               </div>
             )}
 
-            {/* Stream Logs */}
-            <div className="h-36 overflow-y-auto p-2.5 font-mono text-[11px] space-y-1 bg-slate-950">
+            <div className="h-32 overflow-y-auto p-2.5 font-mono text-[11px] space-y-0.5 bg-[#18191a]">
               {cliLogs.length === 0 ? (
-                <div className="text-slate-500 italic">
-                  Sẵn sàng nhận luồng stdout/stderr thời gian thực (500ms buffer)...
-                </div>
+                <div className="text-[#5f6368]">Ready.</div>
               ) : (
                 cliLogs.map((log) => (
                   <div
                     key={log.id}
-                    className={`whitespace-pre-wrap break-words leading-relaxed ${
+                    className={`whitespace-pre-wrap break-words ${
                       log.stream === 'stderr'
-                        ? 'text-rose-400'
+                        ? 'text-[#f28b82]'
                         : log.stream === 'system'
-                        ? 'text-indigo-300'
-                        : 'text-slate-300'
+                        ? 'text-[#9aa0a6]'
+                        : 'text-[#e8eaed]'
                     }`}
                   >
-                    <span className="text-slate-600 select-none">[{log.timestamp}] </span>
+                    <span className="text-[#5f6368] select-none">[{log.timestamp}] </span>
                     {log.text}
                   </div>
                 ))
               )}
             </div>
 
-            {/* Interactive Python Quick Command Input */}
             <form
               onSubmit={handleQuickSubmit}
-              className="px-2.5 py-1.5 bg-slate-900 border-t border-slate-800 flex items-center gap-2"
+              className="px-2.5 py-1.5 bg-[#202124] border-t border-[#3c4043] flex items-center gap-2"
             >
-              <span className="font-mono text-xs text-emerald-400 font-bold">&gt;&gt;&gt;</span>
+              <span className="font-mono text-xs text-[#9aa0a6]">&gt;</span>
               <input
                 type="text"
                 value={quickCmd}
                 onChange={(e) => setQuickCmd(e.target.value)}
-                placeholder="Gõ lệnh Python nhanh (VD: print(df.shape) hoặc print(full_pipeline))..."
-                className="flex-1 bg-transparent text-xs font-mono text-slate-100 focus:outline-none placeholder:text-slate-500"
+                placeholder="Evaluate Python expression (e.g. print(df.shape))..."
+                className="flex-1 bg-transparent text-xs font-mono text-[#e8eaed] focus:outline-none placeholder:text-[#5f6368]"
               />
-              <button
-                type="submit"
-                className="p-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white"
-                title="Thực thi lệnh nhanh trong cùng Global Namespace"
-              >
-                <Send className="w-3 h-3" />
-              </button>
             </form>
           </>
         )}
