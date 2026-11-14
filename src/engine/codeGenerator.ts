@@ -1,4 +1,4 @@
-import { NotebookCell, PipelineConfig } from '../types/studio';
+import { NotebookCell, PipelineConfig, PipelineTemplateId } from '../types/studio';
 
 function formatPyList(items: string[]): string {
   if (items.length === 0) return '[]';
@@ -23,21 +23,29 @@ export function normalizeUrlForPython(rawUrl: string): string {
 export function generateCell1DataLoad(config: PipelineConfig): string {
   let loadBlock = '';
 
-  if (config.datasetSource === 'upload' && config.uploadedFileName) {
-    const safeFile = config.uploadedFileName.replace(/'/g, "\\'");
+  if (config.datasetSource === 'upload') {
+    const safeFile = (config.uploadedFileName || 'train.csv').replace(/'/g, "\\'");
     loadBlock = `DATASET_NAME = '${safeFile}'
 csv_path = f'/tmp/{DATASET_NAME}' if os.path.exists(f'/tmp/{DATASET_NAME}') else DATASET_NAME
+if not os.path.exists(csv_path):
+    raise FileNotFoundError(
+        f"Chưa tìm thấy file '{DATASET_NAME}'. Hãy bấm nút 'Upload CSV' (hoặc chọn tab Public URL) ở cột trái để nạp dữ liệu."
+    )
 df = pd.read_csv(csv_path)`;
-  } else if (config.datasetSource === 'cloud_path' && config.cloudDatasetPath.trim()) {
-    const cPath = config.cloudDatasetPath.trim().replace(/'/g, "\\'");
+  } else if (config.datasetSource === 'cloud_path') {
+    const cPath = (config.cloudDatasetPath.trim() || '/kaggle/input/dataset/train.csv').replace(
+      /'/g,
+      "\\'"
+    );
     const baseName = cPath.split('/').pop() || 'cloud_dataset.csv';
     loadBlock = `DATASET_NAME = '${baseName}'
 df = pd.read_csv('${cPath}')`;
   } else {
     const normUrl = normalizeUrlForPython(
-      config.publicDatasetUrl || '/datasets/titanic.csv'
+      config.publicDatasetUrl ||
+        'https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv'
     ).replace(/'/g, "\\'");
-    const baseName = normUrl.split('/').pop() || 'dataset.csv';
+    const baseName = normUrl.split('/').pop()?.split('?')[0] || 'remote_dataset.csv';
     loadBlock = `DATASET_NAME = '${baseName}'
 DATASET_URL = '${normUrl}'
 # Use cached file if pre-fetched in browser Wasm, otherwise read directly from URL
@@ -903,7 +911,7 @@ export function buildAllPipelineCells(
     }));
   }
 
-  // Update the 5 standard pipeline cells in-place while preserving user cell order, Markdown cells, and custom cells
+  // Update the 5 standard pipeline cells in-place while preserving user cell order, custom titles, Markdown cells, and custom cells
   const templateByStep = new Map(templates.map((t) => [t.stepType, t]));
 
   const updated = existingCells.map((cell) => {
@@ -914,12 +922,164 @@ export function buildAllPipelineCells(
     if (!tpl) return cell;
     return {
       ...cell,
-      title: tpl.title,
-      subtitle: tpl.subtitle,
+      title: cell.customTitle ? cell.title : tpl.title,
+      subtitle: cell.customTitle ? cell.subtitle : tpl.subtitle,
       generatedCode: tpl.code,
       currentCode: cell.isLocked ? cell.currentCode : tpl.code,
     };
   });
 
   return updated;
+}
+
+export function buildCellsFromTemplate(
+  templateId: PipelineTemplateId,
+  currentConfig: PipelineConfig
+): { nextConfig: PipelineConfig; cells: NotebookCell[] } {
+  const fileName = currentConfig.uploadedFileName || 'train.csv';
+
+  if (templateId === 'blank_notebook') {
+    const blankCell: NotebookCell = {
+      id: `code_blank_${Date.now()}`,
+      order: 1,
+      cellType: 'code',
+      stepType: 'custom',
+      title: '1. Python Code Cell',
+      subtitle: 'Interactive Python notebook cell',
+      customTitle: true,
+      generatedCode: '',
+      currentCode: `import numpy as np\nimport pandas as pd\nimport matplotlib.pyplot as plt\n\n# Nạp file CSV hoặc viết code phân tích tự do tại đây\n# df = pd.read_csv('/tmp/${fileName}')\n# df.head(5)`,
+      isLocked: true,
+      status: 'idle',
+      outputText: '',
+      figures: [],
+    };
+    return { nextConfig: currentConfig, cells: [blankCell] };
+  }
+
+  if (templateId === 'eda_exploration') {
+    const cell1Code = generateCell1DataLoad(currentConfig);
+    const cell2Code = `# [2] Kiểm tra Chất lượng Dữ liệu, Missing Values & Cardinality
+summary_df = pd.DataFrame({
+    'dtype': df.dtypes.astype(str),
+    'missing_count': df.isna().sum(),
+    'missing_pct (%)': (df.isna().sum() / len(df) * 100).round(2),
+    'nunique': df.nunique(dropna=True),
+    'unique_ratio (%)': (df.nunique(dropna=True) / max(len(df), 1) * 100).round(1)
+})
+print(f"Tổng số dòng trùng lặp (Duplicate rows): {df.duplicated().sum():,}")
+summary_df`;
+
+    const cell3Code = `# [3] Trực quan hoá Phân phối & Ma trận Tương quan (Correlation Heatmap)
+plt.style.use('dark_background')
+num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+if len(num_cols) >= 2:
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.2), dpi=115)
+    fig.patch.set_facecolor('#202124')
+
+    # 1. Phân phối cột mục tiêu hoặc cột số đầu tiên
+    target_c = '${currentConfig.targetColumn.replace(/'/g, "\\'")}' if '${currentConfig.targetColumn.replace(/'/g, "\\'")}' in df.columns else num_cols[-1]
+    axes[0].set_facecolor('#18191a')
+    df[target_c].dropna().hist(bins=25, ax=axes[0], color='#8ab4f8', edgecolor='#202124')
+    axes[0].set_title(f'Distribution of {target_c}', fontsize=10, color='#e8eaed')
+    axes[0].grid(alpha=0.15)
+
+    # 2. Ma trận tương quan giữa các biến số
+    corr_mat = df[num_cols[:12]].corr()
+    axes[1].set_facecolor('#18191a')
+    im = axes[1].imshow(corr_mat, cmap='coolwarm', vmin=-1, vmax=1)
+    axes[1].set_xticks(range(len(corr_mat.columns)))
+    axes[1].set_yticks(range(len(corr_mat.columns)))
+    axes[1].set_xticklabels(corr_mat.columns, rotation=45, ha='right', fontsize=8)
+    axes[1].set_yticklabels(corr_mat.columns, fontsize=8)
+    axes[1].set_title('Feature Correlation Matrix', fontsize=10, color='#e8eaed')
+    fig.colorbar(im, ax=axes[1], fraction=0.046, pad=0.04)
+    plt.tight_layout()
+
+df.describe().round(3)`;
+
+    const edaCells: NotebookCell[] = [
+      {
+        id: 'cell_01_load',
+        order: 1,
+        cellType: 'code',
+        stepType: 'data_load',
+        title: '1. Nạp Dữ liệu & Đồng bộ Schema',
+        subtitle: 'Đọc file CSV vào DataFrame df',
+        generatedCode: cell1Code,
+        currentCode: cell1Code,
+        isLocked: false,
+        status: 'idle',
+        outputText: '',
+        figures: [],
+      },
+      {
+        id: `eda_quality_${Date.now()}`,
+        order: 2,
+        cellType: 'code',
+        stepType: 'custom',
+        title: '2. Thống kê Khuyết thiếu, Kiểu dữ liệu & Dòng trùng',
+        subtitle: 'Hiển thị bảng tổng hợp chất lượng từng cột',
+        customTitle: true,
+        generatedCode: cell2Code,
+        currentCode: cell2Code,
+        isLocked: true,
+        status: 'idle',
+        outputText: '',
+        figures: [],
+      },
+      {
+        id: `eda_corr_${Date.now() + 1}`,
+        order: 3,
+        cellType: 'code',
+        stepType: 'custom',
+        title: '3. Phân phối Biến & Ma trận Tương quan',
+        subtitle: 'Biểu đồ Histogram và Correlation Matrix',
+        customTitle: true,
+        generatedCode: cell3Code,
+        currentCode: cell3Code,
+        isLocked: true,
+        status: 'idle',
+        outputText: '',
+        figures: [],
+      },
+    ];
+    return { nextConfig: currentConfig, cells: edaCells };
+  }
+
+  let nextConfig: PipelineConfig = { ...currentConfig };
+  if (templateId === 'classification_pipeline') {
+    nextConfig = {
+      ...currentConfig,
+      taskType: 'classification',
+      cvStrategy: 'stratified_kfold',
+      imbalanceStrategy: 'class_weight',
+    };
+  } else if (templateId === 'regression_pipeline') {
+    nextConfig = {
+      ...currentConfig,
+      taskType: 'regression',
+      cvStrategy: 'kfold',
+      logTransformNumeric: true,
+    };
+  } else if (templateId === 'kaggle_submission') {
+    nextConfig = {
+      ...currentConfig,
+      datasetSource: 'upload',
+      uploadedFileName: currentConfig.uploadedFileName || 'train.csv',
+      testUploadedFileName: currentConfig.testUploadedFileName || 'test.csv',
+      tuningStrategy: 'randomized_search',
+    };
+  } else if (templateId === 'timeseries_group_cv') {
+    nextConfig = {
+      ...currentConfig,
+      cvStrategy: 'timeseries_split',
+    };
+  }
+
+  return {
+    nextConfig,
+    cells: buildAllPipelineCells(nextConfig),
+  };
 }

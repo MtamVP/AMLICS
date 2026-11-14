@@ -1,4 +1,4 @@
-import { DataProfile, PipelineConfig } from '../types/studio';
+import { PipelineConfig, PipelineTemplateId } from '../types/studio';
 
 export interface PublicDatasetPreset {
   id: string;
@@ -10,10 +10,62 @@ export interface PublicDatasetPreset {
   dropColumns: string[];
 }
 
+export interface PipelineTemplatePreset {
+  id: PipelineTemplateId;
+  label: string;
+  shortLabel: string;
+  description: string;
+}
+
+export const PIPELINE_TEMPLATES: PipelineTemplatePreset[] = [
+  {
+    id: 'classification_pipeline',
+    label: 'Phân loại chuẩn (Classification + StratifiedKFold)',
+    shortLabel: 'Phân loại (Classification)',
+    description:
+      'Sinh 5 cell chống Data Leakage: Đọc CSV -> ColumnTransformer -> StratifiedKFold -> Huấn luyện -> Đánh giá ROC-AUC & Confusion Matrix.',
+  },
+  {
+    id: 'regression_pipeline',
+    label: 'Dự báo Hồi quy (Regression + Log Transform + RMSE)',
+    shortLabel: 'Hồi quy (Regression)',
+    description:
+      'Sinh 5 cell cho bài toán dự báo số liên tục: Imputer + FunctionTransformer(log1p) -> KFold -> Regressor -> Đánh giá RMSE, MAE, R².',
+  },
+  {
+    id: 'kaggle_submission',
+    label: 'Kaggle Competition (train.csv + test.csv -> submission.csv)',
+    shortLabel: 'Kaggle Submission',
+    description:
+      'Đọc đồng thời train.csv và test.csv, tự động loại bỏ cột ID, chạy Cross-Validation và xuất file submission.csv.',
+  },
+  {
+    id: 'eda_exploration',
+    label: 'Khám phá dữ liệu (EDA, Missing Values & Tương quan)',
+    shortLabel: 'Khám phá EDA',
+    description:
+      'Sinh các cell phân tích thống kê mô tả, kiểm tra tỷ lệ khuyết thiếu, dòng trùng lặp và vẽ biểu đồ tương quan.',
+  },
+  {
+    id: 'timeseries_group_cv',
+    label: 'Chống rò rỉ Thời gian / Nhóm (TimeSeriesSplit & GroupKFold)',
+    shortLabel: 'TimeSeries / GroupCV',
+    description:
+      'Cấu hình kiểm định chéo không trộn thứ tự thời gian (TimeSeriesSplit) hoặc tách biệt theo nhóm (GroupKFold).',
+  },
+  {
+    id: 'blank_notebook',
+    label: 'Notebook Trống (1 Cell Python tự do)',
+    shortLabel: 'Notebook Trống',
+    description:
+      'Khởi tạo 1 cell Python sạch (import pandas, numpy, matplotlib) để bạn tự viết code từ đầu như Google Colab / Kaggle.',
+  },
+];
+
 export const PUBLIC_URL_PRESETS: PublicDatasetPreset[] = [
   {
     id: 'titanic',
-    label: 'Titanic Survival (titanic.csv - Real Dataset)',
+    label: 'Titanic Survival (CSV thực tế - Phân loại)',
     url: '/datasets/titanic.csv',
     targetColumn: 'Survived',
     idColumn: 'PassengerId',
@@ -22,7 +74,7 @@ export const PUBLIC_URL_PRESETS: PublicDatasetPreset[] = [
   },
   {
     id: 'titanic_github',
-    label: 'Titanic Full 891 rows (GitHub Raw CSV)',
+    label: 'Titanic 891 dòng (GitHub Raw CSV)',
     url: 'https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv',
     targetColumn: 'Survived',
     idColumn: 'PassengerId',
@@ -31,7 +83,7 @@ export const PUBLIC_URL_PRESETS: PublicDatasetPreset[] = [
   },
   {
     id: 'housing_github',
-    label: 'California Housing Regression (GitHub Raw CSV)',
+    label: 'California Housing (GitHub Raw CSV - Hồi quy)',
     url: 'https://raw.githubusercontent.com/ageron/handson-ml2/master/datasets/housing/housing.csv',
     targetColumn: 'median_house_value',
     idColumn: '',
@@ -40,61 +92,20 @@ export const PUBLIC_URL_PRESETS: PublicDatasetPreset[] = [
   },
 ];
 
-export const INITIAL_TITANIC_PROFILE: DataProfile = {
-  dataset_name: 'titanic.csv',
-  shape: [200, 11],
-  memory_mb: 0.04,
-  duplicate_rows: 0,
-  columns: [
-    { name: 'PassengerId', dtype: 'int64', inferred_type: 'id_or_constant', missing_pct: 0.0, nunique: 200, is_id_like: true, min: 1, max: 200 },
-    { name: 'Survived', dtype: 'int64', inferred_type: 'binary', missing_pct: 0.0, nunique: 2, mean: 0.345, std: 0.476, min: 0, max: 1 },
-    { name: 'Pclass', dtype: 'int64', inferred_type: 'numeric', missing_pct: 0.0, nunique: 3, mean: 2.38, std: 0.81, min: 1, max: 3 },
-    { name: 'Name', dtype: 'object', inferred_type: 'text', missing_pct: 0.0, nunique: 200, is_id_like: true },
-    { name: 'Sex', dtype: 'object', inferred_type: 'categorical', missing_pct: 0.0, nunique: 2, top_values: { male: 129, female: 71 } },
-    { name: 'Age', dtype: 'float64', inferred_type: 'numeric', missing_pct: 20.5, nunique: 62, mean: 28.4, std: 15.1, min: 0.83, max: 71 },
-    { name: 'SibSp', dtype: 'int64', inferred_type: 'numeric', missing_pct: 0.0, nunique: 6, mean: 0.63, std: 1.25, min: 0, max: 8 },
-    { name: 'Parch', dtype: 'int64', inferred_type: 'numeric', missing_pct: 0.0, nunique: 6, mean: 0.41, std: 0.88, min: 0, max: 5 },
-    { name: 'Ticket', dtype: 'object', inferred_type: 'text', missing_pct: 0.0, nunique: 178, is_id_like: true },
-    { name: 'Fare', dtype: 'float64', inferred_type: 'numeric', missing_pct: 0.0, nunique: 112, mean: 29.8, std: 46.2, min: 0, max: 263 },
-    { name: 'Embarked', dtype: 'object', inferred_type: 'categorical', missing_pct: 0.5, nunique: 3, top_values: { S: 144, C: 36, Q: 19 } },
-  ],
-  head: [
-    { PassengerId: 1, Survived: 0, Pclass: 3, Name: 'Braund, Mr. Owen Harris', Sex: 'male', Age: 22, SibSp: 1, Parch: 0, Ticket: 'A/5 21171', Fare: 7.25, Embarked: 'S' },
-    { PassengerId: 2, Survived: 1, Pclass: 1, Name: 'Cumings, Mrs. John Bradley', Sex: 'female', Age: 38, SibSp: 1, Parch: 0, Ticket: 'PC 17599', Fare: 71.2833, Embarked: 'C' },
-    { PassengerId: 3, Survived: 1, Pclass: 3, Name: 'Heikkinen, Miss. Laina', Sex: 'female', Age: 26, SibSp: 0, Parch: 0, Ticket: 'STON/O2. 3101282', Fare: 7.925, Embarked: 'S' },
-    { PassengerId: 4, Survived: 1, Pclass: 1, Name: 'Futrelle, Mrs. Jacques Heath', Sex: 'female', Age: 35, SibSp: 1, Parch: 0, Ticket: '113803', Fare: 53.1, Embarked: 'S' },
-    { PassengerId: 5, Survived: 0, Pclass: 3, Name: 'Allen, Mr. William Henry', Sex: 'male', Age: 35, SibSp: 0, Parch: 0, Ticket: '373450', Fare: 8.05, Embarked: 'S' },
-  ],
-  warnings: [
-    {
-      level: 'warning',
-      column: 'PassengerId',
-      kind: 'id_column',
-      message: "Column 'PassengerId' has 100% unique sequential values (ID column) -> Automatically added to Drop list to prevent overfitting/leakage.",
-    },
-    {
-      level: 'info',
-      column: 'Age',
-      kind: 'high_missing',
-      message: "Column 'Age' has 20.5% missing values -> Will be imputed inside each CV fold via SimpleImputer.",
-    },
-  ],
-};
-
 export function createDefaultPipelineConfig(): PipelineConfig {
   return {
-    datasetSource: 'public_url',
+    datasetSource: 'upload',
     uploadedFileName: '',
     testUploadedFileName: '',
-    publicDatasetUrl: '/datasets/titanic.csv',
+    publicDatasetUrl: '',
     cloudDatasetPath: '/kaggle/input/',
     subsampleRows: 0,
-    targetColumn: 'Survived',
-    idColumnForSubmission: 'PassengerId',
+    targetColumn: 'target',
+    idColumnForSubmission: 'id',
     taskType: 'classification',
-    dropColumns: ['PassengerId', 'Name', 'Ticket'],
-    numericColumns: ['Pclass', 'Age', 'SibSp', 'Parch', 'Fare'],
-    categoricalColumns: ['Sex', 'Embarked'],
+    dropColumns: ['id'],
+    numericColumns: [],
+    categoricalColumns: [],
 
     numericImputer: 'median',
     numericScaler: 'robust',

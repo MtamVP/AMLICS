@@ -284,19 +284,7 @@ async function ensurePyodideLoaded(): Promise<PyodideInterface> {
     });
 
     await pyodide.runPythonAsync(BOOTSTRAP_PYTHON);
-
-    // Pre-cache default /datasets/titanic.csv into /tmp/_cached_url_dataset.csv so Cell 1 runs offline/instantly
-    try {
-      const resp = await fetch('/datasets/titanic.csv');
-      if (resp.ok) {
-        const csvTxt = await resp.text();
-        pyodide.FS.mkdirTree('/tmp');
-        pyodide.FS.writeFile('/tmp/_cached_url_dataset.csv', csvTxt);
-        pyodide.FS.writeFile('/tmp/titanic.csv', csvTxt);
-      }
-    } catch {
-      // ignore
-    }
+    pyodide.FS.mkdirTree('/tmp');
 
     pyodideInstance = pyodide;
 
@@ -330,7 +318,7 @@ self.onmessage = async (event: MessageEvent) => {
   if (type === 'write_csv') {
     try {
       const pyodide = await ensurePyodideLoaded();
-      const { filename, content, isTestFile, alsoCacheAsUrl } = payload;
+      const { filename, content, isTestFile, alsoCacheAsUrl, silentRestore } = payload;
       pyodide.FS.mkdirTree('/tmp');
       pyodide.FS.writeFile(`/tmp/${filename}`, content);
       if (alsoCacheAsUrl) {
@@ -345,6 +333,7 @@ df_test = pd.read_csv('/tmp/' + TEST_DATASET_NAME)
         self.postMessage({
           type: 'test_csv_uploaded',
           filename,
+          silentRestore: Boolean(silentRestore),
         });
       } else {
         const profileJson = (await pyodide.runPythonAsync(`
@@ -357,6 +346,7 @@ json.dumps(_extract_data_profile_dict(df, DATASET_NAME))
           type: 'csv_uploaded',
           filename,
           dataProfile: JSON.parse(profileJson),
+          silentRestore: Boolean(silentRestore),
         });
       }
     } catch (err) {

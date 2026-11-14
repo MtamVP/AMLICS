@@ -1,7 +1,18 @@
 import React, { useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { Play, Square, Plus, ArrowUp, ArrowDown, Copy } from 'lucide-react';
-import { CellType, NotebookCell } from '../types/studio';
+import {
+  Play,
+  Square,
+  Plus,
+  ArrowUp,
+  ArrowDown,
+  Copy,
+  ChevronDown,
+  ChevronRight,
+  Pencil,
+} from 'lucide-react';
+import { PIPELINE_TEMPLATES } from '../data/sampleDatasets';
+import { CellType, NotebookCell, PipelineTemplateId } from '../types/studio';
 import { renderSafeMarkdownToHtml } from '../utils/markdownRenderer';
 
 interface CenterNotebookPaneProps {
@@ -11,12 +22,14 @@ interface CenterNotebookPaneProps {
   onRunFromCell: (cellId: string) => void;
   onStopCell: () => void;
   onEditCellCode: (cellId: string, newCode: string) => void;
+  onRenameCell: (cellId: string, newTitle: string) => void;
   onToggleLockCell: (cellId: string) => void;
   onResetCellToTemplate: (cellId: string) => void;
   onInsertCellAt: (index: number, cellType: CellType) => void;
   onMoveCell: (cellId: string, direction: 'up' | 'down') => void;
   onDuplicateCell: (cellId: string) => void;
   onDeleteCell: (cellId: string) => void;
+  onApplyTemplate: (templateId: PipelineTemplateId) => void;
 }
 
 export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
@@ -26,15 +39,19 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   onRunFromCell,
   onStopCell,
   onEditCellCode,
+  onRenameCell,
   onToggleLockCell,
   onResetCellToTemplate,
   onInsertCellAt,
   onMoveCell,
   onDuplicateCell,
   onDeleteCell,
+  onApplyTemplate,
 }) => {
   const [collapsedCells, setCollapsedCells] = useState<Record<string, boolean>>({});
   const [editingMarkdownIds, setEditingMarkdownIds] = useState<Record<string, boolean>>({});
+  const [editingTitleCellId, setEditingTitleCellId] = useState<string | null>(null);
+  const [showTemplatesBar, setShowTemplatesBar] = useState<boolean>(true);
 
   const toggleCollapse = (id: string) => {
     setCollapsedCells((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -49,9 +66,9 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
 
   return (
     <main className="w-full h-full bg-[#18191a] flex flex-col overflow-hidden">
-      {/* Colab-style "+ Code" & "+ Text" Subheader */}
+      {/* Colab-style "+ Code", "+ Text" & "+ Mẫu Code có sẵn" Subheader */}
       <div className="px-4 py-1.5 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between select-none shrink-0 text-xs">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <button
             type="button"
             onClick={() => onInsertCellAt(cells.length, 'code')}
@@ -71,27 +88,88 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
           </button>
 
           <span className="text-[#5f6368]">|</span>
-          <span className="text-[11px] text-[#9aa0a6]">
+
+          <button
+            type="button"
+            onClick={() => setShowTemplatesBar((v) => !v)}
+            className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
+              showTemplatesBar
+                ? 'bg-[#292a2d] text-[#8ab4f8] border-[#8ab4f8]/50'
+                : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
+            }`}
+          >
+            Mẫu Pipeline có sẵn {showTemplatesBar ? '▾' : '▸'}
+          </button>
+
+          <span className="text-[#5f6368] hidden sm:inline">|</span>
+          <span className="text-[11px] text-[#9aa0a6] hidden sm:inline">
             {cells.length} cells ({cells.filter((c) => c.cellType === 'code' && !c.isLocked).length}{' '}
-            UI-synced, {cells.filter((c) => c.cellType === 'code' && c.isLocked).length} locked,{' '}
-            {cells.filter((c) => c.cellType === 'markdown').length} text)
+            UI-synced, {cells.filter((c) => c.cellType === 'code' && c.isLocked).length} locked)
           </span>
         </div>
 
-        <span className="hidden md:inline text-[10px] font-mono text-[#9aa0a6]">
-          Shortcuts: Shift+Enter (Run cell)
+        <span className="hidden lg:inline text-[10px] font-mono text-[#9aa0a6]">
+          Click tên cell để đổi tên • Shift+Enter (Chạy cell)
         </span>
       </div>
 
+      {/* Quick-Start Ready-to-Use Templates Bar (Bấm vào tự nhảy code theo đúng ý) */}
+      {showTemplatesBar && (
+        <div className="px-4 py-2 bg-[#202124]/80 border-b border-[#3c4043] flex items-center gap-1.5 overflow-x-auto shrink-0">
+          <span className="text-[10px] font-mono text-[#9aa0a6] shrink-0 mr-1">
+            Chọn mẫu sinh code:
+          </span>
+          {PIPELINE_TEMPLATES.map((tpl) => (
+            <button
+              key={tpl.id}
+              type="button"
+              onClick={() => onApplyTemplate(tpl.id)}
+              title={tpl.description}
+              className="px-2.5 py-1 rounded bg-[#292a2d] hover:bg-[#3c4043] border border-[#3c4043] hover:border-[#8ab4f8] text-[11px] text-[#e8eaed] hover:text-[#8ab4f8] font-mono shrink-0 transition-colors"
+            >
+              {tpl.shortLabel}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Notebook Cells Container */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 custom-scrollbar">
+        {cells.length === 0 && (
+          <div className="p-6 rounded border border-[#3c4043] bg-[#202124] text-center space-y-3 my-4">
+            <div className="text-sm font-medium text-[#e8eaed]">
+              Notebook đang trống — Chọn mẫu Pipeline có sẵn hoặc thêm Cell mới
+            </div>
+            <p className="text-xs text-[#9aa0a6] max-w-xl mx-auto">
+              Bấm vào một trong các mẫu dưới đây để tự động sinh bộ khung code chuẩn chống Data Leakage, hoặc bấm <strong>+ Code</strong> để tự viết code Python từ đầu.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-2 text-left">
+              {PIPELINE_TEMPLATES.map((tpl) => (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  onClick={() => onApplyTemplate(tpl.id)}
+                  className="p-3 rounded border border-[#3c4043] bg-[#18191a] hover:border-[#8ab4f8] hover:bg-[#252629] transition-colors space-y-1"
+                >
+                  <div className="text-xs font-semibold text-[#8ab4f8] font-mono">
+                    {tpl.shortLabel}
+                  </div>
+                  <div className="text-[11px] text-[#9aa0a6] leading-snug">
+                    {tpl.description}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {cells.map((cell, index) => {
           const isRunning = runningCellId === cell.id || cell.status === 'running';
           const isCollapsed = Boolean(collapsedCells[cell.id]);
           const lineCount = Math.max(cell.currentCode.split('\n').length, 3);
-          // Auto-fit editor height without nested vertical scrollbars for normal cells
           const editorHeight = Math.min(Math.max(lineCount * 19 + 20, 85), 520);
           const isMdEditing = Boolean(editingMarkdownIds[cell.id]);
+          const isEditingTitle = editingTitleCellId === cell.id;
 
           if (cell.cellType === 'markdown') {
             return (
@@ -101,13 +179,37 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                   className="rounded border border-[#3c4043] hover:border-[#5f6368] bg-[#202124] overflow-hidden transition-colors"
                 >
                   {/* Markdown Cell Header */}
-                  <div className="px-3 py-1 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between text-[11px]">
-                    <div className="flex items-center gap-2 text-[#9aa0a6]">
-                      <span className="font-mono">[md]</span>
-                      <span className="font-medium text-[#e8eaed]">{cell.title}</span>
+                  <div className="px-3 py-1 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between gap-2 text-[11px]">
+                    <div className="flex items-center gap-2 text-[#9aa0a6] min-w-0 flex-1">
+                      <span className="font-mono shrink-0">[md]</span>
+                      {isEditingTitle ? (
+                        <input
+                          type="text"
+                          autoFocus
+                          value={cell.title}
+                          onChange={(e) => onRenameCell(cell.id, e.target.value)}
+                          onBlur={() => setEditingTitleCellId(null)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === 'Escape') {
+                              setEditingTitleCellId(null);
+                            }
+                          }}
+                          className="bg-[#18191a] border border-[#8ab4f8] rounded px-2 py-0.5 text-xs text-[#e8eaed] font-medium focus:outline-none w-64 max-w-full"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setEditingTitleCellId(cell.id)}
+                          title="Bấm để đổi tên cell này"
+                          className="group flex items-center gap-1.5 font-medium text-[#e8eaed] hover:text-[#8ab4f8] truncate text-left"
+                        >
+                          <span className="truncate">{cell.title}</span>
+                          <Pencil className="w-3 h-3 text-[#9aa0a6] opacity-60 group-hover:opacity-100 shrink-0" />
+                        </button>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-1.5 font-mono">
+                    <div className="flex items-center gap-1.5 font-mono shrink-0">
                       <button
                         type="button"
                         onClick={() => toggleMarkdownEdit(cell.id)}
@@ -137,6 +239,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                         type="button"
                         onClick={() => onDeleteCell(cell.id)}
                         className="px-1.5 py-0.5 rounded-sm hover:bg-[#3c4043] text-[#9aa0a6] hover:text-[#f28b82]"
+                        title="Delete cell"
                       >
                         ×
                       </button>
@@ -176,7 +279,6 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                   )}
                 </div>
 
-                {/* Hover Insert Divider Between Cells */}
                 <InterCellDivider
                   onAddCode={() => onInsertCellAt(index + 1, 'code')}
                   onAddText={() => onInsertCellAt(index + 1, 'markdown')}
@@ -198,7 +300,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
               >
                 {/* Code Cell Header */}
                 <div className="px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between gap-2 text-xs">
-                  <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
                     {/* Colab Play / Stop Bracket */}
                     {isRunning ? (
                       <button
@@ -224,22 +326,57 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                       </button>
                     )}
 
+                    {/* Collapse Toggle Chevron */}
                     <button
                       type="button"
                       onClick={() => toggleCollapse(cell.id)}
-                      className="font-medium text-[#e8eaed] hover:underline truncate text-left"
+                      className="p-0.5 text-[#9aa0a6] hover:text-[#e8eaed] shrink-0"
+                      title={isCollapsed ? 'Mở rộng cell' : 'Thu gọn cell'}
                     >
-                      {cell.title}
+                      {isCollapsed ? (
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      )}
                     </button>
 
-                    <span className="hidden sm:inline text-[11px] text-[#9aa0a6] truncate">
-                      — {cell.subtitle}
-                    </span>
+                    {/* Editable Cell Title for ALL cells */}
+                    {isEditingTitle ? (
+                      <input
+                        type="text"
+                        autoFocus
+                        value={cell.title}
+                        onChange={(e) => onRenameCell(cell.id, e.target.value)}
+                        onBlur={() => setEditingTitleCellId(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === 'Escape') {
+                            setEditingTitleCellId(null);
+                          }
+                        }}
+                        placeholder="Nhập tên cell..."
+                        className="bg-[#18191a] border border-[#8ab4f8] rounded px-2 py-0.5 text-xs text-[#e8eaed] font-medium focus:outline-none w-72 max-w-full"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEditingTitleCellId(cell.id)}
+                        title="Bấm để đổi tên cell"
+                        className="group flex items-center gap-1.5 font-medium text-[#e8eaed] hover:text-[#8ab4f8] truncate text-left"
+                      >
+                        <span className="truncate">{cell.title}</span>
+                        <Pencil className="w-3 h-3 text-[#9aa0a6] opacity-50 group-hover:opacity-100 shrink-0" />
+                      </button>
+                    )}
+
+                    {!isEditingTitle && cell.subtitle && (
+                      <span className="hidden xl:inline text-[11px] text-[#9aa0a6] truncate">
+                        — {cell.subtitle}
+                      </span>
+                    )}
                   </div>
 
                   {/* Right Cell Toolbar */}
                   <div className="flex items-center gap-1.5 shrink-0 text-[11px] font-mono">
-                    {/* Explicit Status Indicator */}
                     {isRunning && (
                       <span className="text-[#8ab4f8]">running...</span>
                     )}
@@ -322,16 +459,14 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                       <Copy className="w-3 h-3" />
                     </button>
 
-                    {cell.stepType === 'custom' && (
-                      <button
-                        type="button"
-                        onClick={() => onDeleteCell(cell.id)}
-                        className="px-1.5 py-0.5 rounded-sm hover:bg-[#3c4043] text-[#9aa0a6] hover:text-[#f28b82]"
-                        title="Delete cell"
-                      >
-                        ×
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => onDeleteCell(cell.id)}
+                      className="px-1.5 py-0.5 rounded-sm hover:bg-[#3c4043] text-[#9aa0a6] hover:text-[#f28b82]"
+                      title="Delete cell"
+                    >
+                      ×
+                    </button>
                   </div>
                 </div>
 
@@ -425,7 +560,6 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                 )}
               </div>
 
-              {/* Hover Insert Divider Between Cells */}
               <InterCellDivider
                 onAddCode={() => onInsertCellAt(index + 1, 'code')}
                 onAddText={() => onInsertCellAt(index + 1, 'markdown')}

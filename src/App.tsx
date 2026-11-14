@@ -6,11 +6,11 @@ import { RightStudioPane } from './components/RightStudioPane';
 import { CloudConnectModal } from './components/CloudConnectModal';
 import {
   createDefaultPipelineConfig,
-  INITIAL_TITANIC_PROFILE,
   PUBLIC_URL_PRESETS,
 } from './data/sampleDatasets';
 import {
   buildAllPipelineCells,
+  buildCellsFromTemplate,
   normalizeUrlForPython,
 } from './engine/codeGenerator';
 import {
@@ -28,10 +28,17 @@ import {
   HardwareInfo,
   NotebookCell,
   PipelineConfig,
+  PipelineTemplateId,
   RuntimeMode,
   SupabaseCredentials,
   WorkerStatus,
 } from './types/studio';
+import {
+  loadCsvFileFromCache,
+  loadWorkspaceStateFromCache,
+  saveCsvFileToCache,
+  saveWorkspaceStateToCache,
+} from './utils/datasetCacheDb';
 import {
   exportPipelineToIpynb,
   parseImportedIpynb,
@@ -66,13 +73,9 @@ export function App() {
     return createDefaultPipelineConfig();
   });
 
-  const [dataProfile, setDataProfile] = useState<DataProfile | null>(
-    () => INITIAL_TITANIC_PROFILE
-  );
+  const [dataProfile, setDataProfile] = useState<DataProfile | null>(null);
 
-  const [cells, setCells] = useState<NotebookCell[]>(() =>
-    buildAllPipelineCells(createDefaultPipelineConfig())
-  );
+  const [cells, setCells] = useState<NotebookCell[]>([]);
 
   const [runningCellId, setRunningCellId] = useState<string | null>(null);
   const [isPipelineRunning, setIsPipelineRunning] = useState<boolean>(false);
@@ -119,7 +122,8 @@ export function App() {
   const trainCsvInputRef = useRef<HTMLInputElement | null>(null);
   const testCsvInputRef = useRef<HTMLInputElement | null>(null);
   const ipynbInputRef = useRef<HTMLInputElement | null>(null);
-  const lastProfileDatasetRef = useRef<string>('titanic.csv');
+  const lastProfileDatasetRef = useRef<string>('');
+  const workspaceHydratedRef = useRef<boolean>(false);
 
   const configRef = useRef(config);
   configRef.current = config;
@@ -167,9 +171,77 @@ export function App() {
     }
   }, [config]);
 
+  // Hydrate cached workspace state (cells + dataProfile) & cached CSVs from IndexedDB on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [{ dataProfile: savedProfile, cells: savedCells }, cachedTrain, cachedTest] =
+        await Promise.all([
+          loadWorkspaceStateFromCache(),
+          loadCsvFileFromCache('train'),
+          loadCsvFileFromCache('test'),
+        ]);
+
+      if (cancelled) return;
+
+      if (savedProfile) {
+        lastProfileDatasetRef.current = savedProfile.dataset_name;
+        setDataProfile(savedProfile);
+      }
+      if (savedCells && savedCells.length > 0) {
+        setCells(savedCells);
+      }
+      workspaceHydratedRef.current = true;
+
+      if (cachedTrain && pyodideWorkerRef.current) {
+        pyodideWorkerRef.current.postMessage({
+          type: 'write_csv',
+          payload: {
+            filename: cachedTrain.filename,
+            content: cachedTrain.content,
+            isTestFile: false,
+            silentRestore: true,
+          },
+        });
+        setConfig((prev) => ({
+          ...prev,
+          uploadedFileName: prev.uploadedFileName || cachedTrain.filename,
+        }));
+      }
+
+      if (cachedTest && pyodideWorkerRef.current) {
+        pyodideWorkerRef.current.postMessage({
+          type: 'write_csv',
+          payload: {
+            filename: cachedTest.filename,
+            content: cachedTest.content,
+            isTestFile: true,
+            silentRestore: true,
+          },
+        });
+        setConfig((prev) => ({
+          ...prev,
+          testUploadedFileName: prev.testUploadedFileName || cachedTest.filename,
+        }));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Auto-save cells & dataProfile to IndexedDB
+  useEffect(() => {
+    if (!workspaceHydratedRef.current) return;
+    saveWorkspaceStateToCache(dataProfile, cells);
+  }, [dataProfile, cells]);
+
   // Sync UI config -> code for unlocked pipeline cells
   useEffect(() => {
-    setCells((prevCells) => buildAllPipelineCells(config, prevCells));
+    setCells((prevCells) =>
+      prevCells.length > 0 ? buildAllPipelineCells(config, prevCells) : prevCells
+    );
   }, [config]);
 
   // Synchronize column roles whenever a new DataProfile arrives
@@ -414,6 +486,7 @@ export function App() {
         payload,
         filename,
         content,
+        silentRestore,
       } = event.data;
 
       if (type === 'status') {
@@ -431,20 +504,34 @@ export function App() {
       } else if (type === 'data_profile' && prof) {
         syncColumnsFromProfile(prof, false);
       } else if (type === 'csv_uploaded' && prof) {
-        syncColumnsFromProfile(prof, true);
-        const droppedIds = prof.columns
-          .filter((c: { is_id_like?: boolean; is_constant?: boolean }) => c.is_id_like || c.is_constant)
-          .map((c: { name: string }) => c.name);
+        if (silentRestore) {
+          setDataProfile(prof);
+          lastProfileDatasetRef.current = prof.dataset_name;
+          appendCliLog(
+            'system',
+            `[Cache] Restored ${filename} (${prof.shape[0].toLocaleString()} rows, ${prof.shape[1]} cols) from browser storage.`
+          );
+        } else {
+          syncColumnsFromProfile(prof, true);
+          const droppedIds = prof.columns
+            .filter((c: { is_id_like?: boolean; is_constant?: boolean }) => c.is_id_like || c.is_constant)
+            .map((c: { name: string }) => c.name);
+          appendCliLog(
+            'system',
+            `Loaded ${filename} (${prof.shape[0].toLocaleString()} rows, ${prof.shape[1]} cols).${
+              droppedIds.length > 0
+                ? ` Auto-dropped ID/Constant columns: [${droppedIds.join(', ')}]`
+                : ''
+            }`
+          );
+        }
+      } else if (type === 'test_csv_uploaded') {
         appendCliLog(
           'system',
-          `Loaded ${filename} (${prof.shape[0].toLocaleString()} rows, ${prof.shape[1]} cols).${
-            droppedIds.length > 0
-              ? ` Auto-dropped ID/Constant columns: [${droppedIds.join(', ')}]`
-              : ''
-          }`
+          silentRestore
+            ? `[Cache] Restored test dataset: ${filename}.`
+            : `Loaded test dataset: ${filename} (for submission.csv).`
         );
-      } else if (type === 'test_csv_uploaded') {
-        appendCliLog('system', `Loaded test dataset: ${filename} (for submission.csv).`);
       } else if (type === 'submission_csv_content' && content) {
         triggerBrowserDownload('submission.csv', content);
       } else if (type === 'cell_result' && payload) {
@@ -659,6 +746,33 @@ export function App() {
     );
   };
 
+  const handleRenameCell = (cellId: string, newTitle: string) => {
+    setCells((prev) =>
+      prev.map((c) =>
+        c.id === cellId
+          ? {
+              ...c,
+              title: newTitle,
+              customTitle: true,
+            }
+          : c
+      )
+    );
+  };
+
+  const handleApplyTemplate = (templateId: PipelineTemplateId) => {
+    const { nextConfig, cells: newCells } = buildCellsFromTemplate(
+      templateId,
+      configRef.current
+    );
+    setConfig(nextConfig);
+    setCells(newCells);
+    appendCliLog(
+      'system',
+      `Applied pipeline template: ${templateId} (${newCells.length} cells generated).`
+    );
+  };
+
   const handleToggleLockCell = (cellId: string) => {
     setCells((prev) =>
       prev.map((c) => (c.id === cellId ? { ...c, isLocked: !c.isLocked } : c))
@@ -823,6 +937,8 @@ ${metricLines}`;
         );
       }
 
+      await saveCsvFileToCache('train', filename, csvText);
+
       pyodideWorkerRef.current?.postMessage({
         type: 'write_csv',
         payload: {
@@ -865,6 +981,8 @@ ${metricLines}`;
     const textContent = await file.text();
     const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
 
+    await saveCsvFileToCache('train', safeFilename, textContent);
+
     pyodideWorkerRef.current?.postMessage({
       type: 'write_csv',
       payload: {
@@ -898,6 +1016,8 @@ ${metricLines}`;
 
     const textContent = await file.text();
     const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+
+    await saveCsvFileToCache('test', safeFilename, textContent);
 
     pyodideWorkerRef.current?.postMessage({
       type: 'write_csv',
@@ -1058,12 +1178,14 @@ ${metricLines}`;
             onRunFromCell={handleRunFromCell}
             onStopCell={handleStopExecution}
             onEditCellCode={handleEditCellCode}
+            onRenameCell={handleRenameCell}
             onToggleLockCell={handleToggleLockCell}
             onResetCellToTemplate={handleResetCellToTemplate}
             onInsertCellAt={handleInsertCellAt}
             onMoveCell={handleMoveCell}
             onDuplicateCell={handleDuplicateCell}
             onDeleteCell={handleDeleteCell}
+            onApplyTemplate={handleApplyTemplate}
           />
         </div>
 
@@ -1104,8 +1226,9 @@ ${metricLines}`;
 
         <div className="flex items-center gap-3">
           <span>
-            {dataProfile?.dataset_name} ({dataProfile?.shape[0].toLocaleString()}×
-            {dataProfile?.shape[1]})
+            {dataProfile
+              ? `${dataProfile.dataset_name} (${dataProfile.shape[0].toLocaleString()}×${dataProfile.shape[1]})`
+              : 'No dataset loaded'}
           </span>
           <span>•</span>
           <span>{config.modelFamily}</span>

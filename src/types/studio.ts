@@ -119,6 +119,7 @@ export interface NotebookCell {
   stepType: StepType;
   title: string;
   subtitle: string;
+  customTitle?: boolean;
   generatedCode: string;
   currentCode: string;
   isLocked: boolean;
@@ -128,6 +129,14 @@ export interface NotebookCell {
   figures: string[];
   durationMs?: number;
 }
+
+export type PipelineTemplateId =
+  | 'classification_pipeline'
+  | 'regression_pipeline'
+  | 'kaggle_submission'
+  | 'eda_exploration'
+  | 'timeseries_group_cv'
+  | 'blank_notebook';
 
 export interface FeatureImportanceItem {
   feature: string;

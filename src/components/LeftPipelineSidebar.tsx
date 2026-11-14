@@ -384,10 +384,16 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
               )}
 
               {/* Active Dataset Summary + Subsampling Control */}
-              <div className="p-2 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between text-[11px]">
+              <div className="p-2 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between gap-2 text-[11px]">
                 <span className="font-mono text-[#e8eaed] truncate">
-                  Active: <strong>{dataProfile?.dataset_name}</strong> ({totalRows.toLocaleString()}×
-                  {dataProfile?.shape[1]})
+                  {dataProfile ? (
+                    <>
+                      Active: <strong>{dataProfile.dataset_name}</strong> (
+                      {totalRows.toLocaleString()}×{dataProfile.shape[1]})
+                    </>
+                  ) : (
+                    <span className="text-[#9aa0a6]">Chưa nạp dữ liệu CSV</span>
+                  )}
                 </span>
                 <select
                   value={config.subsampleRows}
