@@ -22,6 +22,7 @@ import {
 } from '../types/studio';
 import { explainPythonError } from '../utils/errorExplainer';
 import { renderSafeMarkdownToHtml } from '../utils/markdownRenderer';
+import { MarkdownCellEditor } from './MarkdownCellEditor';
 
 interface CenterNotebookPaneProps {
   cells: NotebookCell[];
@@ -696,27 +697,12 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                   </div>
 
                   {isMdEditing ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[#3c4043]">
-                      <textarea
-                        value={cell.currentCode}
-                        onChange={(e) => onEditCellCode(cell.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.shiftKey && e.key === 'Enter') {
-                            e.preventDefault();
-                            toggleMarkdownEdit(cell.id, false);
-                          }
-                        }}
-                        rows={Math.min(Math.max(lineCount + 1, 5), 16)}
-                        placeholder="Write Markdown here (supports # Headings, | GFM Tables |, - [x] Checklists, `code`)..."
-                        className="w-full p-3 bg-[#18191a] text-xs font-mono text-[#e8eaed] focus:outline-none resize-y"
-                      />
-                      <div
-                        className="p-3 bg-[#202124] overflow-x-auto"
-                        dangerouslySetInnerHTML={{
-                          __html: renderSafeMarkdownToHtml(cell.currentCode),
-                        }}
-                      />
-                    </div>
+                    <MarkdownCellEditor
+                      value={cell.currentCode}
+                      onChange={(next) => onEditCellCode(cell.id, next)}
+                      onFinishEdit={() => toggleMarkdownEdit(cell.id, false)}
+                      rows={Math.min(Math.max(lineCount + 1, 5), 16)}
+                    />
                   ) : (
                     <div
                       className="px-4 py-3 cursor-text"
