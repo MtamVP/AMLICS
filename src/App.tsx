@@ -249,12 +249,19 @@ export function App() {
             content: cachedTrain.content,
             isTestFile: false,
             silentRestore: true,
+            alsoCacheAsUrl: configRef.current.datasetSource === 'public_url',
           },
         });
         setConfig((prev) => ({
           ...prev,
           uploadedFileName: prev.uploadedFileName || cachedTrain.filename,
         }));
+      } else if (
+        !cachedTrain &&
+        configRef.current.datasetSource === 'public_url' &&
+        configRef.current.publicDatasetUrl
+      ) {
+        handleFetchPublicUrl(configRef.current.publicDatasetUrl);
       }
 
       if (cachedTest && pyodideWorkerRef.current) {
@@ -886,8 +893,15 @@ export function App() {
           content: cachedTrain.content,
           isTestFile: false,
           silentRestore: true,
+          alsoCacheAsUrl: configRef.current.datasetSource === 'public_url',
         },
       });
+    } else if (
+      !cachedTrain &&
+      configRef.current.datasetSource === 'public_url' &&
+      configRef.current.publicDatasetUrl
+    ) {
+      handleFetchPublicUrl(configRef.current.publicDatasetUrl);
     }
     if (cachedTest && pyodideWorkerRef.current) {
       pyodideWorkerRef.current.postMessage({
