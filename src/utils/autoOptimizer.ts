@@ -131,6 +131,54 @@ export function computeAutoOptimizedConfig(
     );
   }
 
+  // Auto-tune hyperparameters based on dataset size
+  const autoHp: PipelineConfig['hyperparameters'] =
+    nRows < 1000
+      ? {
+          ...current.hyperparameters,
+          nEstimators: 150,
+          learningRate: 0.05,
+          maxDepth: 4,
+          l2Regularization: 2.0,
+          minSamplesLeaf: 10,
+          subsample: 0.85,
+          earlyStopping: false,
+        }
+      : nRows <= 15000
+      ? {
+          ...current.hyperparameters,
+          nEstimators: 250,
+          learningRate: 0.05,
+          maxDepth: 6,
+          l2Regularization: 1.0,
+          minSamplesLeaf: 15,
+          subsample: 0.85,
+          earlyStopping: true,
+        }
+      : {
+          ...current.hyperparameters,
+          nEstimators: 300,
+          learningRate: 0.06,
+          maxDepth: 8,
+          l2Regularization: 1.5,
+          minSamplesLeaf: 20,
+          subsample: 0.8,
+          earlyStopping: true,
+        };
+
+  autoFields.push(
+    'hp.nEstimators',
+    'hp.learningRate',
+    'hp.maxDepth',
+    'hp.l2Regularization',
+    'hp.minSamplesLeaf',
+    'hp.subsample',
+    'hp.earlyStopping'
+  );
+  reasons.push(
+    `Tự động tinh chỉnh siêu tham số theo quy mô ${nRows.toLocaleString()} dòng (n_estimators=${autoHp.nEstimators}, lr=${autoHp.learningRate}, max_depth=${autoHp.maxDepth}, early_stopping=${autoHp.earlyStopping}).`
+  );
+
   const nextConfig: PipelineConfig = {
     ...current,
     taskType,
@@ -147,6 +195,7 @@ export function computeAutoOptimizedConfig(
     tuningStrategy,
     tuningIterations: nRows <= 5000 ? 8 : 5,
     subsampleRows: nRows > 30000 ? 10000 : 0,
+    hyperparameters: autoHp,
     autoSelectedFields: autoFields,
   };
 

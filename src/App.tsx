@@ -1467,6 +1467,13 @@ ${metricLines}`;
         'imbalanceStrategy',
         'modelFamily',
         'tuningStrategy',
+        ...(plan.hyperparameters?.nEstimators !== undefined ? ['hp.nEstimators'] : []),
+        ...(plan.hyperparameters?.learningRate !== undefined ? ['hp.learningRate'] : []),
+        ...(plan.hyperparameters?.maxDepth !== undefined ? ['hp.maxDepth'] : []),
+        ...(plan.hyperparameters?.l2Regularization !== undefined ? ['hp.l2Regularization'] : []),
+        ...(plan.hyperparameters?.minSamplesLeaf !== undefined ? ['hp.minSamplesLeaf'] : []),
+        ...(plan.hyperparameters?.subsample !== undefined ? ['hp.subsample'] : []),
+        ...(plan.hyperparameters?.earlyStopping !== undefined ? ['hp.earlyStopping'] : []),
       ])
     );
 

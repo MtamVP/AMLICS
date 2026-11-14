@@ -1153,9 +1153,15 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div
+                className={
+                  config.tuningStrategy === 'randomized_search'
+                    ? 'grid grid-cols-[1.45fr_1fr] gap-2 items-end'
+                    : 'space-y-1'
+                }
+              >
                 <div>
-                  <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1">
+                  <label className="text-[10px] text-[#9aa0a6] flex items-center mb-1 whitespace-nowrap">
                     <span>Hyperparameter Search</span>
                     <AutoBadge field="tuningStrategy" />
                   </label>
@@ -1168,7 +1174,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                         autoSelectedFields: stripAuto(p, 'tuningStrategy'),
                       }))
                     }
-                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
+                    className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed]"
                   >
                     <option value="none">Manual (Fixed)</option>
                     <option value="randomized_search">RandomizedSearchCV</option>
@@ -1178,7 +1184,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
                 {config.tuningStrategy === 'randomized_search' && (
                   <div>
-                    <label className="text-[10px] text-[#9aa0a6] block mb-1">
+                    <label className="text-[10px] text-[#9aa0a6] block mb-1 whitespace-nowrap">
                       n_iter (Trials)
                     </label>
                     <select
@@ -1189,7 +1195,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                           tuningIterations: Number(e.target.value),
                         }))
                       }
-                      className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed] font-mono"
+                      className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] font-mono"
                     >
                       <option value={5}>5 trials</option>
                       <option value={8}>8 trials</option>
@@ -1202,8 +1208,11 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
               <div className="space-y-2.5 pt-1">
                 <div>
-                  <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                    <span className="text-[#9aa0a6]">n_estimators / max_iter</span>
+                  <div className="flex justify-between items-center text-[11px] font-mono mb-0.5">
+                    <span className="text-[#9aa0a6] flex items-center">
+                      <span>n_estimators / max_iter</span>
+                      <AutoBadge field="hp.nEstimators" />
+                    </span>
                     <span className="text-[#e8eaed]">
                       {config.hyperparameters.nEstimators}
                     </span>
@@ -1217,6 +1226,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     onChange={(e) =>
                       onChangeConfig((p) => ({
                         ...p,
+                        autoSelectedFields: stripAuto(p, 'hp.nEstimators'),
                         hyperparameters: {
                           ...p.hyperparameters,
                           nEstimators: Number(e.target.value),
@@ -1228,8 +1238,11 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                 </div>
 
                 <div>
-                  <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                    <span className="text-[#9aa0a6]">learning_rate</span>
+                  <div className="flex justify-between items-center text-[11px] font-mono mb-0.5">
+                    <span className="text-[#9aa0a6] flex items-center">
+                      <span>learning_rate</span>
+                      <AutoBadge field="hp.learningRate" />
+                    </span>
                     <span className="text-[#e8eaed]">
                       {config.hyperparameters.learningRate}
                     </span>
@@ -1243,6 +1256,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     onChange={(e) =>
                       onChangeConfig((p) => ({
                         ...p,
+                        autoSelectedFields: stripAuto(p, 'hp.learningRate'),
                         hyperparameters: {
                           ...p.hyperparameters,
                           learningRate: Number(e.target.value),
@@ -1255,8 +1269,11 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                      <span className="text-[#9aa0a6]">max_depth</span>
+                    <div className="flex justify-between items-center text-[11px] font-mono mb-0.5">
+                      <span className="text-[#9aa0a6] flex items-center truncate">
+                        <span>max_depth</span>
+                        <AutoBadge field="hp.maxDepth" />
+                      </span>
                       <span className="text-[#e8eaed]">
                         {config.hyperparameters.maxDepth}
                       </span>
@@ -1270,6 +1287,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       onChange={(e) =>
                         onChangeConfig((p) => ({
                           ...p,
+                          autoSelectedFields: stripAuto(p, 'hp.maxDepth'),
                           hyperparameters: {
                             ...p.hyperparameters,
                             maxDepth: Number(e.target.value),
@@ -1281,8 +1299,11 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                   </div>
 
                   <div>
-                    <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                      <span className="text-[#9aa0a6]">l2_reg / alpha</span>
+                    <div className="flex justify-between items-center text-[11px] font-mono mb-0.5">
+                      <span className="text-[#9aa0a6] flex items-center truncate">
+                        <span>l2_reg / alpha</span>
+                        <AutoBadge field="hp.l2Regularization" />
+                      </span>
                       <span className="text-[#e8eaed]">
                         {config.hyperparameters.l2Regularization}
                       </span>
@@ -1296,6 +1317,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       onChange={(e) =>
                         onChangeConfig((p) => ({
                           ...p,
+                          autoSelectedFields: stripAuto(p, 'hp.l2Regularization'),
                           hyperparameters: {
                             ...p.hyperparameters,
                             l2Regularization: Number(e.target.value),
@@ -1321,8 +1343,11 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                   <div className="space-y-2.5 pt-1">
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                          <span className="text-[#9aa0a6]">min_samples_leaf</span>
+                        <div className="flex justify-between items-center text-[11px] font-mono mb-0.5">
+                          <span className="text-[#9aa0a6] flex items-center truncate">
+                            <span>min_samples_leaf</span>
+                            <AutoBadge field="hp.minSamplesLeaf" />
+                          </span>
                           <span className="text-[#e8eaed]">
                             {config.hyperparameters.minSamplesLeaf}
                           </span>
@@ -1336,6 +1361,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                           onChange={(e) =>
                             onChangeConfig((p) => ({
                               ...p,
+                              autoSelectedFields: stripAuto(p, 'hp.minSamplesLeaf'),
                               hyperparameters: {
                                 ...p.hyperparameters,
                                 minSamplesLeaf: Number(e.target.value),
@@ -1347,8 +1373,11 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       </div>
 
                       <div>
-                        <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                          <span className="text-[#9aa0a6]">subsample</span>
+                        <div className="flex justify-between items-center text-[11px] font-mono mb-0.5">
+                          <span className="text-[#9aa0a6] flex items-center truncate">
+                            <span>subsample</span>
+                            <AutoBadge field="hp.subsample" />
+                          </span>
                           <span className="text-[#e8eaed]">
                             {config.hyperparameters.subsample}
                           </span>
@@ -1362,6 +1391,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                           onChange={(e) =>
                             onChangeConfig((p) => ({
                               ...p,
+                              autoSelectedFields: stripAuto(p, 'hp.subsample'),
                               hyperparameters: {
                                 ...p.hyperparameters,
                                 subsample: Number(e.target.value),
@@ -1380,6 +1410,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                         onChange={() =>
                           onChangeConfig((p) => ({
                             ...p,
+                            autoSelectedFields: stripAuto(p, 'hp.earlyStopping'),
                             hyperparameters: {
                               ...p.hyperparameters,
                               earlyStopping: !p.hyperparameters.earlyStopping,
@@ -1388,7 +1419,10 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                         }
                         className="accent-[#8ab4f8]"
                       />
-                      <span>early_stopping=True (Stop on val plateau)</span>
+                      <span className="flex items-center">
+                        <span>early_stopping=True (Stop on val plateau)</span>
+                        <AutoBadge field="hp.earlyStopping" />
+                      </span>
                     </label>
                   </div>
                 )}
