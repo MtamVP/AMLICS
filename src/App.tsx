@@ -375,7 +375,20 @@ export function App() {
 
       if (cancelled) return;
 
-      const wsHasOwnState = Boolean(activeWs && (activeWs.cells.length > 0 || activeWs.dataProfile));
+      const hasStoredWorkspaces = (() => {
+        try {
+          return Boolean(localStorage.getItem(WORKSPACES_STORAGE_KEY));
+        } catch {
+          return false;
+        }
+      })();
+      const wsHasOwnState = Boolean(
+        activeWs &&
+          (hasStoredWorkspaces ||
+            activeWs.id !== 'ws_default' ||
+            activeWs.cells.length > 0 ||
+            activeWs.dataProfile)
+      );
       if (!wsHasOwnState) {
         if (savedProfile) {
           lastProfileDatasetRef.current = savedProfile.dataset_name;
@@ -1549,6 +1562,30 @@ ${metricLines}`;
     appendCliLog('system', `Inserted Markdown summary cell for Run #${exp.runNumber}.`);
   };
 
+  const ensureCellsInitializedForDataset = useCallback((nextCfg: PipelineConfig) => {
+    if (cellsRef.current.length > 0) return;
+    const generated = buildAllPipelineCells(nextCfg, []);
+    cellsRef.current = generated;
+    setCells(generated);
+    setActiveCellId(generated[0]?.id || null);
+  }, []);
+
+  const handleUseCloudDatasetPath = useCallback(
+    (cloudPath: string) => {
+      const trimmed = cloudPath.trim();
+      if (!trimmed) return;
+      const nextCfg: PipelineConfig = {
+        ...configRef.current,
+        datasetSource: 'cloud_path',
+        cloudDatasetPath: trimmed,
+      };
+      setConfig(nextCfg);
+      ensureCellsInitializedForDataset(nextCfg);
+      appendCliLog('system', `[Colab/Kaggle] Đã chọn dataset: ${trimmed}`);
+    },
+    [appendCliLog, ensureCellsInitializedForDataset]
+  );
+
   // Load dataset from Public URL (with GitHub/GDrive normalization & CORS proxy fallback)
   const handleFetchPublicUrl = async (rawUrl: string, presetId?: string) => {
     const trimmed = rawUrl.trim();
@@ -1598,8 +1635,8 @@ ${metricLines}`;
       });
 
       configProvenanceRef.current = 'ai_copilot';
-    setConfig((prev) => ({
-        ...prev,
+      const nextCfg: PipelineConfig = {
+        ...configRef.current,
         datasetSource: 'public_url',
         publicDatasetUrl: normalized,
         ...(preset
@@ -1610,7 +1647,9 @@ ${metricLines}`;
               dropColumns: preset.dropColumns,
             }
           : {}),
-      }));
+      };
+      setConfig(nextCfg);
+      ensureCellsInitializedForDataset(nextCfg);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setUrlError(`Failed to load URL (${msg}). Check CORS or URL path.`);
@@ -1673,15 +1712,17 @@ ${metricLines}`;
     }
 
     configProvenanceRef.current = 'ai_copilot';
-    setConfig((prev) => ({
-      ...prev,
+    const nextCfg: PipelineConfig = {
+      ...configRef.current,
       datasetSource: 'upload',
       uploadedFileName: safeFilename,
-      cloudDatasetPath: publicUrl || prev.cloudDatasetPath,
+      cloudDatasetPath: publicUrl || configRef.current.cloudDatasetPath,
       // Auto-enable 10k row subsampling if file > 15MB in browser Wasm
       subsampleRows:
         runtimeMode === 'pyodide' && file.size > 15 * 1024 * 1024 ? 10000 : 0,
-    }));
+    };
+    setConfig(nextCfg);
+    ensureCellsInitializedForDataset(nextCfg);
   };
 
   // Upload Train CSV
@@ -1924,10 +1965,7 @@ ${metricLines}`;
     } catch {
       // ignore
     }
-    const nextCells =
-      target.cells && target.cells.length > 0
-        ? target.cells
-        : buildAllPipelineCells(target.config, []);
+    const nextCells = target.cells || [];
     setActiveWorkspaceId(target.id);
     setProjectName(target.name);
     setConfig(target.config);
@@ -1950,7 +1988,7 @@ ${metricLines}`;
     }
     const newName = `AMLICS_Notebook_${idx}`;
     const defaultCfg = createDefaultPipelineConfig();
-    const initialCells = buildAllPipelineCells(defaultCfg, []);
+    const initialCells: NotebookCell[] = [];
     const newWs: StoredWorkspaceSnapshot = {
       id: newId,
       name: newName,
@@ -1975,11 +2013,11 @@ ${metricLines}`;
     lastProfileDatasetRef.current = '';
     setDataProfile(null);
     setCells(initialCells);
-    setActiveCellId(initialCells[0]?.id || null);
+    setActiveCellId(null);
     setExperiments([]);
     setSelectedExpId(null);
     resetRuntimeForWorkspaceSwitch();
-    appendCliLog('system', `Đã tạo notebook mới hoàn toàn độc lập: ${newName}.ipynb`);
+    appendCliLog('system', `Đã tạo notebook mới trống hoàn toàn: ${newName}.ipynb`);
   };
 
   const handleDeleteWorkspace = (targetId: string) => {
@@ -1998,10 +2036,7 @@ ${metricLines}`;
       } catch {
         // ignore
       }
-      const nextCells =
-        nextWs.cells && nextWs.cells.length > 0
-          ? nextWs.cells
-          : buildAllPipelineCells(nextWs.config, []);
+      const nextCells = nextWs.cells || [];
       setActiveWorkspaceId(nextWs.id);
       setProjectName(nextWs.name);
       setConfig(nextWs.config);
@@ -2101,7 +2136,7 @@ ${metricLines}`;
           skipNextCloudPushRef.current = true;
           const mapped: StoredWorkspaceSnapshot[] = res.notebooks.map((n) => ({
             ...n,
-            cells: n.cells && n.cells.length > 0 ? n.cells : buildAllPipelineCells(n.config, []),
+            cells: n.cells || [],
           }));
           setWorkspaces(mapped);
           try {
@@ -2864,6 +2899,7 @@ ${metricLines}`;
               onUploadTestCsvClick={() => testCsvInputRef.current?.click()}
               onUploadSampleSubCsvClick={() => sampleSubInputRef.current?.click()}
               onFetchPublicUrl={handleFetchPublicUrl}
+              onUseCloudDatasetPath={handleUseCloudDatasetPath}
               onSwitchToCloud={() => {
                 setRuntimeMode('cloud');
                 setIsCloudModalOpen(true);
@@ -2897,6 +2933,7 @@ ${metricLines}`;
               onApplyTemplate={handleApplyTemplate}
               onInsertQuickSnippet={handleInsertQuickSnippet}
               onDropCsvFile={processTrainCsvFile}
+              onUploadCsvClick={() => trainCsvInputRef.current?.click()}
             />
           </div>
         )}

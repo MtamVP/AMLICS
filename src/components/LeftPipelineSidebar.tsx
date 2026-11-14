@@ -31,6 +31,7 @@ interface LeftPipelineSidebarProps {
   onUploadTestCsvClick: () => void;
   onUploadSampleSubCsvClick: () => void;
   onFetchPublicUrl: (url: string, presetId?: string) => void;
+  onUseCloudDatasetPath?: (cloudPath: string) => void;
   onSwitchToCloud: () => void;
   onAutoOptimize: () => void;
 }
@@ -62,6 +63,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   onUploadTestCsvClick,
   onUploadSampleSubCsvClick,
   onFetchPublicUrl,
+  onUseCloudDatasetPath,
   onSwitchToCloud,
   onAutoOptimize,
 }) => {
@@ -453,18 +455,30 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                         <label className="text-[10px] text-[#9aa0a6] block mb-1">
                           Remote file path on Colab / Kaggle
                         </label>
-                        <input
-                          type="text"
-                          placeholder="/kaggle/input/competition/train.csv"
-                          value={config.cloudDatasetPath}
-                          onChange={(e) =>
-                            onChangeConfig((p) => ({
-                              ...p,
-                              cloudDatasetPath: e.target.value,
-                            }))
-                          }
-                          className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] font-mono focus:outline-none focus:border-[#8ab4f8]"
-                        />
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            placeholder="/kaggle/input/competition/train.csv"
+                            value={config.cloudDatasetPath}
+                            onChange={(e) =>
+                              onChangeConfig((p) => ({
+                                ...p,
+                                cloudDatasetPath: e.target.value,
+                              }))
+                            }
+                            className="flex-1 min-w-0 bg-[#202124] border border-[#3c4043] rounded px-2 py-1.5 text-xs text-[#e8eaed] font-mono focus:outline-none focus:border-[#8ab4f8]"
+                          />
+                          {onUseCloudDatasetPath && (
+                            <button
+                              type="button"
+                              disabled={!config.cloudDatasetPath.trim() || config.cloudDatasetPath.trim() === '/kaggle/input/'}
+                              onClick={() => onUseCloudDatasetPath(config.cloudDatasetPath)}
+                              className="px-2 py-1.5 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] disabled:opacity-40 text-[#202124] text-[11px] font-medium shrink-0"
+                            >
+                              Dùng file này
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {availableCloudFiles.length > 0 && (
@@ -477,12 +491,16 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                               <button
                                 key={fp}
                                 type="button"
-                                onClick={() =>
-                                  onChangeConfig((p) => ({
-                                    ...p,
-                                    cloudDatasetPath: fp,
-                                  }))
-                                }
+                                onClick={() => {
+                                  if (onUseCloudDatasetPath) {
+                                    onUseCloudDatasetPath(fp);
+                                  } else {
+                                    onChangeConfig((p) => ({
+                                      ...p,
+                                      cloudDatasetPath: fp,
+                                    }));
+                                  }
+                                }}
                                 className="w-full text-left px-2 py-1 text-[10px] font-mono text-[#8ab4f8] hover:bg-[#292a2d] truncate"
                               >
                                 {fp}

@@ -45,6 +45,7 @@ interface CenterNotebookPaneProps {
   onApplyTemplate: (templateId: PipelineTemplateId) => void;
   onInsertQuickSnippet: (snippetId: QuickSnippetId) => void;
   onDropCsvFile?: (file: File) => void;
+  onUploadCsvClick?: () => void;
 }
 
 export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
@@ -68,6 +69,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   onApplyTemplate,
   onInsertQuickSnippet,
   onDropCsvFile,
+  onUploadCsvClick,
 }) => {
   const [collapsedCells, setCollapsedCells] = useState<Record<string, boolean>>({});
   const [editingMarkdownIds, setEditingMarkdownIds] = useState<Record<string, boolean>>({});
@@ -577,13 +579,24 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
         className="flex-1 overflow-y-auto px-4 py-3 space-y-2 custom-scrollbar"
       >
         {cells.length === 0 && (
-          <div className="p-6 rounded border border-[#3c4043] bg-[#202124] text-center space-y-3 my-4">
+          <div className="p-6 rounded-lg border border-white/[0.08] bg-[#1e1f23] text-center space-y-3 my-4">
             <div className="text-sm font-medium text-[#e8eaed]">
-              Notebook đang trống — Chọn mẫu Pipeline có sẵn hoặc thêm Cell mới
+              Notebook trống — Tải dữ liệu hoặc chọn mẫu Pipeline để bắt đầu
             </div>
             <p className="text-xs text-[#9aa0a6] max-w-xl mx-auto">
-              Bấm vào một trong các mẫu dưới đây để tự động sinh bộ khung code chuẩn chống Data Leakage, hoặc bấm <strong>+ Code</strong> để tự viết code Python từ đầu.
+              Tải lên file <code>train.csv</code>, chọn dữ liệu Public URL / Colab-Kaggle ở cột trái để tự động sinh 5 cell Pipeline, hoặc chọn mẫu bên dưới / bấm <strong>+ Code</strong>.
             </p>
+            {onUploadCsvClick && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={onUploadCsvClick}
+                  className="px-3.5 py-1.5 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] text-xs font-medium transition-colors"
+                >
+                  Tải file train.csv lên (Tự tạo 5 cell)
+                </button>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-2 text-left">
               {PIPELINE_TEMPLATES.map((tpl) => (
                 <button
