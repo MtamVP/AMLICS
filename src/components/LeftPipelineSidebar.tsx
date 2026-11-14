@@ -29,6 +29,7 @@ interface LeftPipelineSidebarProps {
   onChangeConfig: (updater: (prev: PipelineConfig) => PipelineConfig) => void;
   onUploadCsvClick: () => void;
   onUploadTestCsvClick: () => void;
+  onUploadSampleSubCsvClick: () => void;
   onFetchPublicUrl: (url: string, presetId?: string) => void;
   onSwitchToCloud: () => void;
   onAutoOptimize: () => void;
@@ -59,6 +60,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   onChangeConfig,
   onUploadCsvClick,
   onUploadTestCsvClick,
+  onUploadSampleSubCsvClick,
   onFetchPublicUrl,
   onSwitchToCloud,
   onAutoOptimize,
@@ -317,6 +319,50 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     >
                       Select test.csv
                     </button>
+                  </div>
+
+                  <div className="p-2 rounded bg-[#202124] border border-[#3c4043] space-y-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[10px] text-[#9aa0a6]">
+                          Demo Submission (sample_submission.csv)
+                        </div>
+                        <div className="text-xs font-mono text-[#e8eaed] truncate">
+                          {config.sampleSubmission
+                            ? `${config.sampleSubmission.fileName} (${config.sampleSubmission.rowCount.toLocaleString()} rows)`
+                            : 'Chưa tải (tự suy luận theo Target)'}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {config.sampleSubmission && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onChangeConfig((p) => ({ ...p, sampleSubmission: null }))
+                            }
+                            title="Gỡ bỏ sample_submission.csv"
+                            className="px-1.5 py-1 rounded bg-[#292a2d] hover:bg-[#f28b82]/20 text-[#9aa0a6] hover:text-[#f28b82] text-[11px]"
+                          >
+                            ×
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={onUploadSampleSubCsvClick}
+                          className="px-2 py-1 rounded bg-[#292a2d] hover:bg-[#3c4043] text-[#8ab4f8] text-[11px] shrink-0"
+                        >
+                          Select demo
+                        </button>
+                      </div>
+                    </div>
+                    {config.sampleSubmission && (
+                      <div className="text-[10px] font-mono text-[#81c995] bg-[#81c995]/10 border border-[#81c995]/25 rounded px-2 py-1 leading-snug">
+                        Cấu trúc: [{config.sampleSubmission.columns.join(', ')}] •{' '}
+                        {config.sampleSubmission.expectsProbabilities
+                          ? 'Xác suất (predict_proba)'
+                          : 'Nhãn (predict)'}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

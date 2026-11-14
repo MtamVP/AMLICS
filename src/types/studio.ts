@@ -49,10 +49,20 @@ export interface HyperparameterConfig {
   randomState: number;
 }
 
+export interface SampleSubmissionSchema {
+  fileName: string;
+  columns: string[];
+  idColumn: string;
+  targetColumns: string[];
+  rowCount: number;
+  expectsProbabilities: boolean;
+}
+
 export interface PipelineConfig {
   datasetSource: 'upload' | 'public_url' | 'cloud_path';
   uploadedFileName: string;
   testUploadedFileName: string;
+  sampleSubmission?: SampleSubmissionSchema | null;
   publicDatasetUrl: string;
   cloudDatasetPath: string;
   subsampleRows: number; // 0 = full dataset, >0 = sample n rows for fast iteration

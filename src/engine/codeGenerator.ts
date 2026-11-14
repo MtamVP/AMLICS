@@ -919,7 +919,35 @@ print(f"Summary -> Train {metric_label}: {train_score:.4f} | CV {metric_label}: 
 
 export function generateCell5Evaluate(config: PipelineConfig): string {
   const isClass = config.taskType === 'classification';
-  const idCol = (config.idColumnForSubmission || 'id').replace(/'/g, "\\'");
+  const sampleSub = config.sampleSubmission;
+  const idCol = (sampleSub?.idColumn || config.idColumnForSubmission || 'id').replace(/'/g, "\\'");
+  const sampleTargetCols = sampleSub?.targetColumns || [];
+  const isMultiColSub = isClass && sampleTargetCols.length > 1;
+  const singleTargetCol = sampleTargetCols.length === 1 ? sampleTargetCols[0].replace(/'/g, "\\'") : '';
+  const expectsProba = sampleSub ? sampleSub.expectsProbabilities : isClass;
+
+  const predCode = isMultiColSub
+    ? `# Multi-class probability submission matching sample_submission.csv columns
+_sub_cols = [${sampleTargetCols.map((c) => `'${c.replace(/'/g, "\\'")}'`).join(', ')}]
+if hasattr(full_pipeline, "predict_proba"):
+    _probs = full_pipeline.predict_proba(sub_X)
+    _cls_list = [str(c) for c in getattr(full_pipeline, "classes_", range(_probs.shape[1]))]
+    for _idx, _sc in enumerate(_sub_cols):
+        if _sc in _cls_list:
+            submission_data[_sc] = np.round(_probs[:, _cls_list.index(_sc)], 6)
+        elif _idx < _probs.shape[1]:
+            submission_data[_sc] = np.round(_probs[:, _idx], 6)
+        else:
+            submission_data[_sc] = 0.0
+else:
+    _preds = full_pipeline.predict(sub_X)
+    for _sc in _sub_cols:
+        submission_data[_sc] = (_preds.astype(str) == _sc).astype(float)`
+    : isClass && expectsProba
+    ? `sub_preds = full_pipeline.predict_proba(sub_X)[:, 1] if hasattr(full_pipeline, "predict_proba") and len(np.unique(y_train)) == 2 else full_pipeline.predict(sub_X)
+submission_data[${singleTargetCol ? `'${singleTargetCol}'` : 'TARGET_COL'}] = np.round(sub_preds, 6) if np.issubdtype(np.asarray(sub_preds).dtype, np.number) else sub_preds`
+    : `sub_preds = full_pipeline.predict(sub_X)
+submission_data[${singleTargetCol ? `'${singleTargetCol}'` : 'TARGET_COL'}] = np.round(sub_preds, 6) if np.issubdtype(np.asarray(sub_preds).dtype, np.number) else sub_preds`;
 
   const submissionExportBlock = `
 # Export predictions to submission.csv (uses df_test if loaded and schema matches, otherwise holdout X_test)
@@ -932,6 +960,8 @@ _use_df_test = (
 )
 if 'df_test' in globals() and isinstance(df_test, pd.DataFrame) and not _use_df_test:
     print("Note: Loaded df_test columns do not match trained features; using holdout X_test for submission.csv.")
+elif not _use_df_test:
+    print("Note: No test.csv loaded — generating submission.csv from Holdout X_test split.")
 sub_source_df = df_test if _use_df_test else clean_df.loc[X_test.index]
 if _use_df_test:
     sub_X = sub_source_df[_req_cols].copy()
@@ -944,16 +974,11 @@ if _use_df_test:
             sub_X[_cc] = sub_X[_cc].where(sub_X[_cc].notna(), np.nan).apply(lambda _v: str(_v) if pd.notna(_v) else np.nan)
 else:
     sub_X = X_test.copy()
-${
-  isClass
-    ? `sub_preds = full_pipeline.predict_proba(sub_X)[:, 1] if hasattr(full_pipeline, "predict_proba") and len(np.unique(y_train)) == 2 else full_pipeline.predict(sub_X)`
-    : `sub_preds = full_pipeline.predict(sub_X)`
-}
-id_col_name = '${idCol}' if '${idCol}' in sub_source_df.columns else sub_source_df.columns[0]
-submission_df = pd.DataFrame({
-    id_col_name: sub_source_df[id_col_name].values if id_col_name in sub_source_df.columns else np.arange(len(sub_X)),
-    TARGET_COL: np.round(sub_preds, 6) if np.issubdtype(np.asarray(sub_preds).dtype, np.number) else sub_preds
-})
+id_col_name = '${idCol}'
+_id_vals = sub_source_df[id_col_name].values if id_col_name in sub_source_df.columns else (sub_source_df.iloc[:, 0].values if len(sub_source_df.columns) > 0 else np.arange(len(sub_X)))
+submission_data = {id_col_name: _id_vals}
+${predCode}
+submission_df = pd.DataFrame(submission_data)
 submission_df.to_csv('/tmp/submission.csv', index=False) if os.path.exists('/tmp') else None
 submission_df.to_csv('submission.csv', index=False)
 print(f"Saved submission.csv ({len(submission_df):,} rows, columns: {list(submission_df.columns)})")`;

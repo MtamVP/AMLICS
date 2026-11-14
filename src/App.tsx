@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import Papa from 'papaparse';
 import { TopNavbar } from './components/TopNavbar';
 import { LeftPipelineSidebar } from './components/LeftPipelineSidebar';
 import { CenterNotebookPane } from './components/CenterNotebookPane';
@@ -244,6 +245,7 @@ export function App() {
 
   const trainCsvInputRef = useRef<HTMLInputElement | null>(null);
   const testCsvInputRef = useRef<HTMLInputElement | null>(null);
+  const sampleSubInputRef = useRef<HTMLInputElement | null>(null);
   const ipynbInputRef = useRef<HTMLInputElement | null>(null);
   const lastProfileDatasetRef = useRef<string>('');
   const workspaceHydratedRef = useRef<boolean>(false);
@@ -1618,6 +1620,57 @@ ${metricLines}`;
     }));
   };
 
+  // Upload Demo / Sample Submission CSV (Kaggle sample_submission.csv)
+  const handleSampleSubCsvChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    const textContent = await file.text();
+    const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const parsed = Papa.parse<Record<string, string>>(textContent, {
+      header: true,
+      skipEmptyLines: true,
+      preview: 25,
+    });
+    const fields = (parsed.meta.fields || []).map((f) => f.trim()).filter(Boolean);
+    if (fields.length < 2) {
+      appendCliLog('stderr', `[Submission Demo] File ${safeFilename} phải có ít nhất 2 cột (cột ID và cột dự đoán).`);
+      return;
+    }
+
+    const totalLines = textContent.split(/\r?\n/).filter((l) => l.trim().length > 0).length;
+    const rowCount = Math.max(0, totalLines - 1);
+    const idColumn = fields[0];
+    const targetColumns = fields.slice(1);
+    const firstTarget = targetColumns[0];
+    const sampleVals = (parsed.data || [])
+      .map((r) => String(r[firstTarget] ?? '').trim())
+      .filter(Boolean);
+    const hasDecimalFloat = sampleVals.some((v) => /^\d+\.\d+$/.test(v));
+    const expectsProbabilities = targetColumns.length > 1 || hasDecimalFloat;
+
+    setConfig((prev) => ({
+      ...prev,
+      idColumnForSubmission: idColumn,
+      sampleSubmission: {
+        fileName: safeFilename,
+        columns: fields,
+        idColumn,
+        targetColumns,
+        rowCount,
+        expectsProbabilities,
+      },
+    }));
+
+    appendCliLog(
+      'system',
+      `[Submission Demo] Đã nhận cấu trúc từ ${safeFilename} (${rowCount.toLocaleString()} dòng): ID='${idColumn}', Target=[${targetColumns.join(', ')}], Kiểu=${
+        expectsProbabilities ? 'Xác suất (predict_proba)' : 'Nhãn (predict)'
+      }.`
+    );
+  };
+
   // Import .ipynb
   const handleIpynbFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2261,6 +2314,13 @@ ${metricLines}`;
         className="hidden"
       />
       <input
+        ref={sampleSubInputRef}
+        type="file"
+        accept=".csv,text/csv"
+        onChange={handleSampleSubCsvChange}
+        className="hidden"
+      />
+      <input
         ref={ipynbInputRef}
         type="file"
         accept=".ipynb,application/json"
@@ -2348,6 +2408,7 @@ ${metricLines}`;
               onChangeConfig={setConfig}
               onUploadCsvClick={() => trainCsvInputRef.current?.click()}
               onUploadTestCsvClick={() => testCsvInputRef.current?.click()}
+              onUploadSampleSubCsvClick={() => sampleSubInputRef.current?.click()}
               onFetchPublicUrl={handleFetchPublicUrl}
               onSwitchToCloud={() => {
                 setRuntimeMode('cloud');
