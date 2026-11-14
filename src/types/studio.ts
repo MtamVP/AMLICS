@@ -199,6 +199,8 @@ export interface ExperimentMetrics {
   cv_std?: number;
 }
 
+export type ConfigProvenance = 'manual' | 'auto_advisor' | 'ai_copilot' | 'tournament';
+
 export interface ExperimentRecord {
   id: string;
   runNumber: number;
@@ -209,14 +211,24 @@ export interface ExperimentRecord {
   modelFamily: ModelFamily;
   taskType: TaskType;
   runtimeUsed: string;
+  configSource?: ConfigProvenance;
+  autoSelectedFields?: string[];
+  tuningStrategy?: TuningStrategy;
+  tuningIterations?: number;
   hyperparameters: HyperparameterConfig;
   preprocessingSummary: {
     numericImputer: string;
+    categoricalImputer?: string;
     numericScaler: string;
     categoricalEncoder: string;
     imbalanceStrategy: string;
+    featureSelection?: string;
+    varianceThreshold?: boolean;
+    logTransformNumeric?: boolean;
+    polynomialInteractions?: boolean;
     cvStrategy: string;
     cvFolds: number;
+    testSize?: number;
     featureCount: number;
   };
   metrics: ExperimentMetrics;

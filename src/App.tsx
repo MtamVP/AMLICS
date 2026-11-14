@@ -33,6 +33,7 @@ import {
 import {
   CellType,
   CliLogEntry,
+  ConfigProvenance,
   DataProfile,
   ExperimentRecord,
   HardwareInfo,
@@ -101,6 +102,7 @@ export function App() {
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [isPipelineRunning, setIsPipelineRunning] = useState<boolean>(false);
   const [isTournamentRunning, setIsTournamentRunning] = useState<boolean>(false);
+  const configProvenanceRef = useRef<ConfigProvenance>('manual');
   const [hasSubmissionCsv, setHasSubmissionCsv] = useState<boolean>(false);
   const [showLeftPanel, setShowLeftPanel] = useState<boolean>(true);
   const [showRightPanel, setShowRightPanel] = useState<boolean>(true);
@@ -268,7 +270,8 @@ export function App() {
             alsoCacheAsUrl: configRef.current.datasetSource === 'public_url',
           },
         });
-        setConfig((prev) => ({
+        configProvenanceRef.current = 'ai_copilot';
+    setConfig((prev) => ({
           ...prev,
           uploadedFileName: prev.uploadedFileName || cachedTrain.filename,
         }));
@@ -290,7 +293,8 @@ export function App() {
             silentRestore: true,
           },
         });
-        setConfig((prev) => ({
+        configProvenanceRef.current = 'ai_copilot';
+    setConfig((prev) => ({
           ...prev,
           testUploadedFileName: prev.testUploadedFileName || cachedTest.filename,
         }));
@@ -562,14 +566,29 @@ export function App() {
             runtimeUsed: isCloud
               ? `${hw?.platform || 'Cloud'} (${hw?.gpu || 'CPU'})`
               : 'Browser (Pyodide)',
+            configSource:
+              configProvenanceRef.current !== 'manual'
+                ? configProvenanceRef.current
+                : curConfig.autoSelectedFields && curConfig.autoSelectedFields.length > 0
+                ? 'auto_advisor'
+                : 'manual',
+            autoSelectedFields: [...(curConfig.autoSelectedFields || [])],
+            tuningStrategy: curConfig.tuningStrategy,
+            tuningIterations: curConfig.tuningIterations,
             hyperparameters: { ...curConfig.hyperparameters },
             preprocessingSummary: {
               numericImputer: curConfig.numericImputer,
+              categoricalImputer: curConfig.categoricalImputer,
               numericScaler: curConfig.numericScaler,
               categoricalEncoder: curConfig.categoricalEncoder,
               imbalanceStrategy: curConfig.imbalanceStrategy,
+              featureSelection: curConfig.featureSelection,
+              varianceThreshold: curConfig.varianceThreshold,
+              logTransformNumeric: curConfig.logTransformNumeric,
+              polynomialInteractions: curConfig.polynomialInteractions,
               cvStrategy: curConfig.cvStrategy,
               cvFolds: curConfig.cvFolds,
+              testSize: curConfig.testSize,
               featureCount:
                 curConfig.numericColumns.length +
                 curConfig.categoricalColumns.length,
@@ -920,6 +939,7 @@ export function App() {
         : ['LinearModel', 'RandomForest', 'ExtraTrees', 'HistGradientBoosting'];
 
     stopRequestedRef.current = false;
+    configProvenanceRef.current = 'tournament';
     setIsPipelineRunning(true);
     setIsTournamentRunning(true);
     appendCliLog('system', `[Tournament] Bắt đầu so sánh ${models.length} mô hình: ${models.join(', ')}...`);
@@ -939,7 +959,8 @@ export function App() {
       for (const model of models) {
         if (stopRequestedRef.current) break;
         appendCliLog('system', `[Tournament] Đang huấn luyện ${model}...`);
-        setConfig((prev) => ({
+        configProvenanceRef.current = 'ai_copilot';
+    setConfig((prev) => ({
           ...prev,
           modelFamily: model,
           autoSelectedFields: (prev.autoSelectedFields || []).filter((f) => f !== 'modelFamily'),
@@ -959,6 +980,7 @@ export function App() {
         appendCliLog('system', '[Tournament] Hoàn tất so sánh! Xem bảng xếp hạng ở tab Leaderboard.');
       }
     } finally {
+      configProvenanceRef.current = 'manual';
       setIsTournamentRunning(false);
       setIsPipelineRunning(false);
     }
@@ -967,7 +989,8 @@ export function App() {
   const handleApplyQuickFix = useCallback(
     (kind: 'regularize' | 'balance' | 'boost') => {
       if (kind === 'regularize') {
-        setConfig((prev) => ({
+        configProvenanceRef.current = 'ai_copilot';
+    setConfig((prev) => ({
           ...prev,
           hyperparameters: {
             ...prev.hyperparameters,
@@ -979,10 +1002,12 @@ export function App() {
         }));
         appendCliLog('system', '[ML Coach] Đã giảm max_depth, tăng min_samples_leaf & L2 để chống Overfitting. Hãy bấm Run all để kiểm chứng.');
       } else if (kind === 'balance') {
-        setConfig((prev) => ({ ...prev, imbalanceStrategy: 'class_weight' }));
+        configProvenanceRef.current = 'ai_copilot';
+    setConfig((prev) => ({ ...prev, imbalanceStrategy: 'class_weight' }));
         appendCliLog('system', '[ML Coach] Đã bật imbalanceStrategy = class_weight để cân bằng lớp thiểu số.');
       } else {
-        setConfig((prev) => ({
+        configProvenanceRef.current = 'ai_copilot';
+    setConfig((prev) => ({
           ...prev,
           modelFamily: 'HistGradientBoosting',
           hyperparameters: {
@@ -1011,6 +1036,7 @@ export function App() {
     if (idx <= 0) return;
 
     stopRequestedRef.current = false;
+    configProvenanceRef.current = 'tournament';
     setIsPipelineRunning(true);
     for (const cell of cellsRef.current.slice(0, idx)) {
       if (stopRequestedRef.current) break;
@@ -1031,6 +1057,7 @@ export function App() {
   const handleRunPendingOrErrorCells = useCallback(async () => {
     if (runningCellId) return;
     stopRequestedRef.current = false;
+    configProvenanceRef.current = 'tournament';
     setIsPipelineRunning(true);
     for (const cell of cellsRef.current) {
       if (stopRequestedRef.current) break;
@@ -1386,7 +1413,8 @@ ${metricLines}`;
         },
       });
 
-      setConfig((prev) => ({
+      configProvenanceRef.current = 'ai_copilot';
+    setConfig((prev) => ({
         ...prev,
         datasetSource: 'public_url',
         publicDatasetUrl: normalized,
@@ -1433,6 +1461,7 @@ ${metricLines}`;
       void cloudBrokerRef.current.sendUploadCsv(safeFilename, textContent, false, false);
     }
 
+    configProvenanceRef.current = 'ai_copilot';
     setConfig((prev) => ({
       ...prev,
       datasetSource: 'upload',
@@ -1478,6 +1507,7 @@ ${metricLines}`;
       void cloudBrokerRef.current.sendUploadCsv(safeFilename, textContent, true, false);
     }
 
+    configProvenanceRef.current = 'ai_copilot';
     setConfig((prev) => ({
       ...prev,
       testUploadedFileName: safeFilename,
@@ -1662,6 +1692,7 @@ ${metricLines}`;
       return;
     }
     const { nextConfig, reasons } = computeAutoOptimizedConfig(dataProfile, config);
+    configProvenanceRef.current = 'auto_advisor';
     setConfig(nextConfig);
     appendCliLog(
       'system',
@@ -1692,6 +1723,7 @@ ${metricLines}`;
       ])
     );
 
+    configProvenanceRef.current = 'ai_copilot';
     setConfig((prev) => ({
       ...prev,
       ...(plan.taskType ? { taskType: plan.taskType } : {}),

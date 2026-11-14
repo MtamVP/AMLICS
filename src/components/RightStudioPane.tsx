@@ -17,6 +17,7 @@ import {
   TaskType,
 } from '../types/studio';
 import { evaluateModelHealth } from '../utils/autoOptimizer';
+import { ExperimentCompareModal } from './ExperimentCompareModal';
 
 export interface WhatIfResult {
   prediction: string | number;
@@ -93,6 +94,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
   const [filterCurrentDataset, setFilterCurrentDataset] = useState<boolean>(false);
   const [whatIfValues, setWhatIfValues] = useState<Record<string, string | number>>({});
   const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState<boolean>(false);
   const [colSearch, setColSearch] = useState<string>('');
   const [colRoleFilter, setColRoleFilter] = useState<'all' | 'numeric' | 'categorical' | 'drop'>('all');
   const [rowSearch, setRowSearch] = useState<string>('');
@@ -288,7 +290,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
             )}
 
             {experiments.length > 0 && (
-              <div className="flex items-center justify-between text-[11px] text-[#9aa0a6]">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#9aa0a6]">
                 <label className="flex items-center gap-1.5 cursor-pointer">
                   <input
                     type="checkbox"
@@ -298,13 +300,33 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                   />
                   <span>Filter by {currentDsName || 'current dataset'}</span>
                 </label>
-                <button
-                  type="button"
-                  onClick={onClearExperiments}
-                  className="hover:text-[#f28b82]"
-                >
-                  Clear all
-                </button>
+                <div className="flex items-center gap-2">
+                  {visibleExperiments.length >= 2 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (compareIds.length < 2) {
+                          const latest = [...visibleExperiments]
+                            .sort((a, b) => a.runNumber - b.runNumber)
+                            .slice(-Math.min(5, visibleExperiments.length))
+                            .map((e) => e.id);
+                          setCompareIds(latest);
+                        }
+                        setIsCompareModalOpen(true);
+                      }}
+                      className="px-2 py-0.5 rounded bg-[#8ab4f8]/15 border border-[#8ab4f8]/50 text-[#8ab4f8] hover:bg-[#8ab4f8]/25 font-mono text-[10px]"
+                    >
+                      So sánh chuyên sâu ({Math.max(2, compareIds.length)} runs) ⤢
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={onClearExperiments}
+                    className="hover:text-[#f28b82]"
+                  >
+                    Clear all
+                  </button>
+                </div>
               </div>
             )}
 
@@ -406,13 +428,22 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                           <span className="font-semibold text-[#8ab4f8]">
                             So sánh Run #{expA.runNumber} vs Run #{expB.runNumber}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => setCompareIds([])}
-                            className="text-[10px] text-[#9aa0a6] hover:text-[#e8eaed]"
-                          >
-                            Đóng
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setIsCompareModalOpen(true)}
+                              className="text-[10px] font-mono text-[#8ab4f8] hover:underline"
+                            >
+                              Mở bảng chi tiết ⤢
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCompareIds([])}
+                              className="text-[10px] text-[#9aa0a6] hover:text-[#e8eaed]"
+                            >
+                              Đóng
+                            </button>
+                          </div>
                         </div>
                         <div className="flex items-center gap-3 font-mono text-[10px]">
                           <span>
@@ -595,8 +626,20 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                         )}
 
                         <div className="flex items-center justify-between pt-1.5 border-t border-[#292a2d] text-[10px] font-mono text-[#9aa0a6]">
-                          <span>
-                            lr={exp.hyperparameters.learningRate} depth={exp.hyperparameters.maxDepth}
+                          <span className="flex items-center gap-1.5 truncate">
+                            <span className="px-1 rounded bg-[#292a2d] text-[#8ab4f8] border border-[#3c4043] text-[9px]">
+                              {exp.configSource === 'ai_copilot'
+                                ? 'AI'
+                                : exp.configSource === 'auto_advisor' ||
+                                  (exp.autoSelectedFields?.length ?? 0) > 0
+                                ? 'Auto'
+                                : exp.configSource === 'tournament'
+                                ? 'Tour'
+                                : 'Manual'}
+                            </span>
+                            <span>
+                              lr={exp.hyperparameters.learningRate} depth={exp.hyperparameters.maxDepth}
+                            </span>
                           </span>
                           <div className="flex items-center gap-2">
                             <button
@@ -607,7 +650,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                                   if (prev.includes(exp.id)) {
                                     return prev.filter((id) => id !== exp.id);
                                   }
-                                  return prev.length >= 2 ? [prev[1], exp.id] : [...prev, exp.id];
+                                  return prev.length >= 5 ? [...prev.slice(1), exp.id] : [...prev, exp.id];
                                 });
                               }}
                               className={`px-1.5 py-0.2 rounded border text-[10px] ${
@@ -1458,6 +1501,18 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
           </div>
         </div>
       )}
+
+      <ExperimentCompareModal
+        isOpen={isCompareModalOpen}
+        onClose={() => setIsCompareModalOpen(false)}
+        experiments={visibleExperiments}
+        selectedIds={compareIds}
+        onChangeSelectedIds={setCompareIds}
+        onRestoreExperiment={(exp) => {
+          onRestoreExperiment(exp);
+          setIsCompareModalOpen(false);
+        }}
+      />
     </aside>
   );
 };
