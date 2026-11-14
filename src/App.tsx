@@ -80,6 +80,7 @@ export function App() {
   const [cells, setCells] = useState<NotebookCell[]>([]);
 
   const [runningCellId, setRunningCellId] = useState<string | null>(null);
+  const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [isPipelineRunning, setIsPipelineRunning] = useState<boolean>(false);
   const [hasSubmissionCsv, setHasSubmissionCsv] = useState<boolean>(false);
 
@@ -709,6 +710,119 @@ export function App() {
     }
   }, [handleRunFromCell]);
 
+  const handleRunActiveCell = useCallback(async () => {
+    if (runningCellId) return;
+    const targetId = activeCellId || cellsRef.current[0]?.id;
+    if (!targetId) return;
+    await executeSingleCell(targetId);
+  }, [runningCellId, activeCellId, executeSingleCell]);
+
+  const handleRunBeforeActiveCell = useCallback(async () => {
+    if (runningCellId) return;
+    const targetId = activeCellId || cellsRef.current[0]?.id;
+    const idx = cellsRef.current.findIndex((c) => c.id === targetId);
+    if (idx <= 0) return;
+
+    stopRequestedRef.current = false;
+    setIsPipelineRunning(true);
+    for (const cell of cellsRef.current.slice(0, idx)) {
+      if (stopRequestedRef.current) break;
+      if (cell.cellType === 'markdown') continue;
+      const ok = await executeSingleCell(cell.id);
+      if (!ok || stopRequestedRef.current) break;
+    }
+    setIsPipelineRunning(false);
+  }, [runningCellId, activeCellId, executeSingleCell]);
+
+  const handleRunFromActiveCell = useCallback(async () => {
+    const targetId = activeCellId || cellsRef.current[0]?.id;
+    if (targetId) {
+      await handleRunFromCell(targetId);
+    }
+  }, [activeCellId, handleRunFromCell]);
+
+  const handleRunPendingOrErrorCells = useCallback(async () => {
+    if (runningCellId) return;
+    stopRequestedRef.current = false;
+    setIsPipelineRunning(true);
+    for (const cell of cellsRef.current) {
+      if (stopRequestedRef.current) break;
+      if (cell.cellType === 'markdown') continue;
+      if (cell.status === 'idle' || cell.status === 'error' || cell.status === 'stopped') {
+        const ok = await executeSingleCell(cell.id);
+        if (!ok || stopRequestedRef.current) break;
+      }
+    }
+    setIsPipelineRunning(false);
+  }, [runningCellId, executeSingleCell]);
+
+  const handleClearAllOutputs = useCallback(() => {
+    setCells((prev) =>
+      prev.map((c) => ({
+        ...c,
+        status: 'idle',
+        outputText: '',
+        htmlOutput: undefined,
+        figures: [],
+        durationMs: undefined,
+      }))
+    );
+    appendCliLog('system', 'Cleared all cell outputs.');
+  }, [appendCliLog]);
+
+  const restoreCachedCsvsToWorker = useCallback(async () => {
+    const [cachedTrain, cachedTest] = await Promise.all([
+      loadCsvFileFromCache('train'),
+      loadCsvFileFromCache('test'),
+    ]);
+    if (cachedTrain && pyodideWorkerRef.current) {
+      pyodideWorkerRef.current.postMessage({
+        type: 'write_csv',
+        payload: {
+          filename: cachedTrain.filename,
+          content: cachedTrain.content,
+          isTestFile: false,
+          silentRestore: true,
+        },
+      });
+    }
+    if (cachedTest && pyodideWorkerRef.current) {
+      pyodideWorkerRef.current.postMessage({
+        type: 'write_csv',
+        payload: {
+          filename: cachedTest.filename,
+          content: cachedTest.content,
+          isTestFile: true,
+          silentRestore: true,
+        },
+      });
+    }
+  }, []);
+
+  const handleRestartKernel = useCallback(async () => {
+    stopRequestedRef.current = true;
+    setIsPipelineRunning(false);
+    setRunningCellId(null);
+    setNamespaceVars(['pd', 'np', 'plt']);
+    if (runtimeMode === 'pyodide') {
+      initPyodideWorker();
+      await restoreCachedCsvsToWorker();
+      appendCliLog('system', 'Restarted Browser Pyodide kernel (variables cleared, cached CSV files preserved).');
+    } else {
+      cloudBrokerRef.current?.sendStopCell();
+      appendCliLog('system', 'Sent restart/interrupt signal to Cloud Worker.');
+    }
+  }, [runtimeMode, initPyodideWorker, restoreCachedCsvsToWorker, appendCliLog]);
+
+  const handleRestartAndRunAll = useCallback(async () => {
+    await handleRestartKernel();
+    handleClearAllOutputs();
+    const firstCell = cellsRef.current[0];
+    if (firstCell) {
+      await handleRunFromCell(firstCell.id);
+    }
+  }, [handleRestartKernel, handleClearAllOutputs, handleRunFromCell]);
+
   const handleStopExecution = useCallback(() => {
     stopRequestedRef.current = true;
     setIsPipelineRunning(false);
@@ -1167,7 +1281,15 @@ ${metricLines}`;
         cloudHardware={cloudHardware}
         isExecuting={runningCellId !== null || isPipelineRunning}
         hasSubmissionCsv={hasSubmissionCsv}
+        hasActiveCell={cells.length > 0}
         onRunAllCells={handleRunAllCells}
+        onRunActiveCell={handleRunActiveCell}
+        onRunBeforeActiveCell={handleRunBeforeActiveCell}
+        onRunFromActiveCell={handleRunFromActiveCell}
+        onRunPendingOrErrorCells={handleRunPendingOrErrorCells}
+        onRestartAndRunAll={handleRestartAndRunAll}
+        onRestartKernel={handleRestartKernel}
+        onClearAllOutputs={handleClearAllOutputs}
         onStopExecution={handleStopExecution}
         onOpenCloudModal={() => setIsCloudModalOpen(true)}
         onExportIpynb={() => exportPipelineToIpynb(projectName, config, cells)}
@@ -1200,7 +1322,9 @@ ${metricLines}`;
           <CenterNotebookPane
             cells={cells}
             runningCellId={runningCellId}
+            activeCellId={activeCellId}
             activeDatasetName={dataProfile?.dataset_name || config.uploadedFileName}
+            onSelectCell={setActiveCellId}
             onRunCell={executeSingleCell}
             onRunFromCell={handleRunFromCell}
             onStopCell={handleStopExecution}

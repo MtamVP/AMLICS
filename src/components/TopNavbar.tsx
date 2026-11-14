@@ -1,5 +1,5 @@
-import React from 'react';
-import { Play, Square } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ChevronDown, Play, RotateCcw, Square, Trash2 } from 'lucide-react';
 import { HardwareInfo, RuntimeMode, WorkerStatus } from '../types/studio';
 
 interface TopNavbarProps {
@@ -14,7 +14,15 @@ interface TopNavbarProps {
   cloudHardware: HardwareInfo | null;
   isExecuting: boolean;
   hasSubmissionCsv: boolean;
+  hasActiveCell: boolean;
   onRunAllCells: () => void;
+  onRunActiveCell: () => void;
+  onRunBeforeActiveCell: () => void;
+  onRunFromActiveCell: () => void;
+  onRunPendingOrErrorCells: () => void;
+  onRestartAndRunAll: () => void;
+  onRestartKernel: () => void;
+  onClearAllOutputs: () => void;
   onStopExecution: () => void;
   onOpenCloudModal: () => void;
   onExportIpynb: () => void;
@@ -34,7 +42,15 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   cloudHardware,
   isExecuting,
   hasSubmissionCsv,
+  hasActiveCell,
   onRunAllCells,
+  onRunActiveCell,
+  onRunBeforeActiveCell,
+  onRunFromActiveCell,
+  onRunPendingOrErrorCells,
+  onRestartAndRunAll,
+  onRestartKernel,
+  onClearAllOutputs,
   onStopExecution,
   onOpenCloudModal,
   onExportIpynb,
@@ -42,8 +58,26 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onUploadCsvClick,
   onDownloadSubmissionCsv,
 }) => {
+  const [runMenuOpen, setRunMenuOpen] = useState(false);
+  const runMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (runMenuRef.current && !runMenuRef.current.contains(e.target as Node)) {
+        setRunMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const triggerMenuAction = (fn: () => void) => {
+    setRunMenuOpen(false);
+    fn();
+  };
+
   return (
-    <header className="h-11 px-3 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between gap-3 select-none shrink-0">
+    <header className="h-11 px-3 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between gap-3 select-none shrink-0 relative z-30">
       {/* Left: Brand, Notebook Filename & Menu Actions */}
       <div className="flex items-center gap-2.5 min-w-0">
         <div className="flex items-center gap-2">
@@ -75,14 +109,101 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               <span>Interrupt</span>
             </button>
           ) : (
-            <button
-              type="button"
-              onClick={onRunAllCells}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] transition-colors"
-            >
-              <Play className="w-3 h-3 fill-current" />
-              <span>Run all</span>
-            </button>
+            <div ref={runMenuRef} className="relative flex items-center">
+              <button
+                type="button"
+                onClick={onRunAllCells}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-l text-xs font-medium bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] transition-colors"
+                title="Run all cells in notebook"
+              >
+                <Play className="w-3 h-3 fill-current" />
+                <span>Run all</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRunMenuOpen((o) => !o)}
+                className="px-1.5 py-1 rounded-r bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] border-l border-[#202124]/25 transition-colors"
+                title="More Run & Runtime options"
+                aria-label="Run options"
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </button>
+
+              {runMenuOpen && (
+                <div className="absolute left-0 top-full mt-1 w-64 rounded border border-[#3c4043] bg-[#292a2d] shadow-xl py-1 text-xs text-[#e8eaed] z-50">
+                  <button
+                    type="button"
+                    onClick={() => triggerMenuAction(onRunAllCells)}
+                    className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] flex items-center justify-between"
+                  >
+                    <span>Run all cells</span>
+                    <span className="text-[10px] font-mono text-[#9aa0a6]">All</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!hasActiveCell}
+                    onClick={() => triggerMenuAction(onRunActiveCell)}
+                    className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] disabled:opacity-40 flex items-center justify-between"
+                  >
+                    <span>Run selected cell</span>
+                    <span className="text-[10px] font-mono text-[#9aa0a6]">Ctrl+Enter</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!hasActiveCell}
+                    onClick={() => triggerMenuAction(onRunBeforeActiveCell)}
+                    className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] disabled:opacity-40 flex items-center justify-between"
+                  >
+                    <span>Run before selected cell</span>
+                    <span className="text-[10px] font-mono text-[#9aa0a6]">↑</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!hasActiveCell}
+                    onClick={() => triggerMenuAction(onRunFromActiveCell)}
+                    className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] disabled:opacity-40 flex items-center justify-between"
+                  >
+                    <span>Run selected &amp; cells below</span>
+                    <span className="text-[10px] font-mono text-[#9aa0a6]">▶↓</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => triggerMenuAction(onRunPendingOrErrorCells)}
+                    className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] flex items-center justify-between"
+                  >
+                    <span>Run unrun / failed cells</span>
+                    <span className="text-[10px] font-mono text-[#fdd663]">Retry</span>
+                  </button>
+
+                  <div className="my-1 border-t border-[#3c4043]" />
+
+                  <button
+                    type="button"
+                    onClick={() => triggerMenuAction(onRestartAndRunAll)}
+                    className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] flex items-center gap-2 text-[#8ab4f8]"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Restart kernel &amp; Run all</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => triggerMenuAction(onRestartKernel)}
+                    className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] flex items-center gap-2"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-[#9aa0a6]" />
+                    <span>Restart kernel (clear memory)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => triggerMenuAction(onClearAllOutputs)}
+                    className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] flex items-center gap-2 text-[#9aa0a6] hover:text-[#e8eaed]"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Clear all cell outputs</span>
+                  </button>
+                </div>
+              )}
+            </div>
           )}
 
           <button

@@ -23,7 +23,9 @@ import { renderSafeMarkdownToHtml } from '../utils/markdownRenderer';
 interface CenterNotebookPaneProps {
   cells: NotebookCell[];
   runningCellId: string | null;
+  activeCellId?: string | null;
   activeDatasetName?: string;
+  onSelectCell?: (cellId: string) => void;
   onRunCell: (cellId: string) => void;
   onRunFromCell: (cellId: string) => void;
   onStopCell: () => void;
@@ -42,7 +44,9 @@ interface CenterNotebookPaneProps {
 export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   cells,
   runningCellId,
+  activeCellId,
   activeDatasetName,
+  onSelectCell,
   onRunCell,
   onRunFromCell,
   onStopCell,
@@ -339,11 +343,14 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
           return (
             <React.Fragment key={cell.id}>
               <div
+                onClick={() => onSelectCell?.(cell.id)}
                 className={`rounded border transition-colors overflow-hidden bg-[#202124] ${
                   isRunning
                     ? 'border-[#8ab4f8]'
                     : cell.status === 'error'
                     ? 'border-[#f28b82]/60'
+                    : activeCellId === cell.id
+                    ? 'border-[#5f6368] border-l-2 border-l-[#8ab4f8]'
                     : 'border-[#3c4043] hover:border-[#5f6368]'
                 }`}
               >
