@@ -18,9 +18,29 @@ export function normalizeUrlForPython(rawUrl: string): string {
   if (ghMatch) {
     return `https://raw.githubusercontent.com/${ghMatch[1]}/${ghMatch[2]}/${ghMatch[3]}`;
   }
-  const gdriveMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/i);
-  if (gdriveMatch && trimmed.includes('drive.google.com')) {
-    return `https://drive.google.com/uc?export=download&id=${gdriveMatch[1]}`;
+  const gsheetMatch = trimmed.match(
+    /^https?:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/i
+  );
+  if (gsheetMatch) {
+    const gidMatch = trimmed.match(/[?&#]gid=([0-9]+)/i);
+    const gidParam = gidMatch ? `&gid=${gidMatch[1]}` : '';
+    return `https://docs.google.com/spreadsheets/d/${gsheetMatch[1]}/export?format=csv${gidParam}`;
+  }
+  if (trimmed.includes('drive.google.com')) {
+    const fileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/i);
+    const idQueryMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
+    const driveId = fileMatch?.[1] || idQueryMatch?.[1];
+    if (driveId) {
+      return `https://drive.google.com/uc?export=download&id=${driveId}`;
+    }
+  }
+  if (/^https?:\/\/(www\.)?dropbox\.com\//i.test(trimmed)) {
+    if (/[?&]dl=0/i.test(trimmed)) {
+      return trimmed.replace(/([?&])dl=0/i, '$1dl=1');
+    }
+    if (!/[?&]dl=1/i.test(trimmed)) {
+      return trimmed + (trimmed.includes('?') ? '&dl=1' : '?dl=1');
+    }
   }
   return trimmed;
 }
@@ -43,8 +63,18 @@ df = pd.read_csv(csv_path)`;
       "\\'"
     );
     const baseName = cPath.split('/').pop() || 'cloud_dataset.csv';
+    const lowerPath = cPath.toLowerCase();
+    const readExpr = lowerPath.endsWith('.parquet')
+      ? `pd.read_parquet('${cPath}')`
+      : lowerPath.endsWith('.tsv')
+      ? `pd.read_csv('${cPath}', sep='\\t')`
+      : `pd.read_csv('${cPath}')`;
     loadBlock = `DATASET_NAME = '${baseName}'
-df = pd.read_csv('${cPath}')`;
+if not os.path.exists('${cPath}'):
+    raise FileNotFoundError(
+        f"Không tìm thấy file '${cPath}' trên Colab/Kaggle. Hãy kiểm tra lại đường dẫn hoặc kết nối Cloud Worker."
+    )
+df = ${readExpr}`;
   } else {
     const normUrl = normalizeUrlForPython(
       config.publicDatasetUrl ||

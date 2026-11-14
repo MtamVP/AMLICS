@@ -251,6 +251,27 @@ export class SupabaseCloudBroker {
     });
   }
 
+  public async sendUploadCsv(
+    filename: string,
+    content: string,
+    isTestFile = false,
+    alsoCacheAsUrl = false
+  ): Promise<void> {
+    if (!this.channel) return;
+    await this.channel.send({
+      type: 'broadcast',
+      event: 'upload_csv',
+      payload: {
+        session_id: this.sessionId,
+        auth_token: this.workerSecret,
+        filename,
+        content,
+        is_test_file: isTestFile,
+        also_cache_as_url: alsoCacheAsUrl,
+      },
+    });
+  }
+
   public async sendPing(): Promise<void> {
     if (!this.channel) return;
     await this.channel.send({
@@ -441,11 +462,11 @@ def stop_thread(t):
 log_q, ev_q = queue.Queue(), queue.Queue()
 GLOBAL_NS = {"__name__": "__main__", "pd": pd, "np": np, "plt": plt, "SESSION_ID": SESSION_ID}
 GLOBAL_NS["_emit_data_profile"] = lambda df, name="Cloud_Dataset.csv": ev_q.put(("data_profile", extract_profile(df, name)))
-worker_state = {"status": "idle", "thread": None, "exec_id": None}
+worker_state = {"status": "idle", "thread": None, "exec_id": None, "cell_id": None}
 
 def run_cell_job(payload):
     cid, eid, code = payload.get("cell_id", "cell"), payload.get("execution_id", "exec"), payload.get("code", "")
-    worker_state["status"], worker_state["exec_id"] = "busy", eid
+    worker_state["status"], worker_state["exec_id"], worker_state["cell_id"] = "busy", eid, cid
     GLOBAL_NS["_automl_experiment_result"] = None
     o_out, o_err = sys.stdout, sys.stderr
     c_out, c_err = StreamCapture(log_q, "stdout", o_out), StreamCapture(log_q, "stderr", o_err)
@@ -479,7 +500,7 @@ def run_cell_job(payload):
         figs.append("data:image/png;base64," + base64.b64encode(b.read()).decode())
     plt.close("all")
     has_sub = os.path.exists("/tmp/submission.csv") or os.path.exists("submission.csv")
-    ev_q.put(("cell_result", {"cell_id": cid, "execution_id": eid, "status": status, "duration_ms": dur, "stdout_summary": c_out.buf.getvalue()[-10000:], "html_output": html_out, "figures_base64": figs, "experiment_record": GLOBAL_NS.get("_automl_experiment_result"), "has_submission_csv": has_sub, "runtime_info": detect_hw()}))
+    ev_q.put(("cell_result", {"cell_id": cid, "execution_id": eid, "status": status, "duration_ms": dur, "stdout_summary": c_out.buf.getvalue()[-10000:], "html_output": html_out, "figures_base64": figs, "experiment_record": GLOBAL_NS.get("_automl_experiment_result"), "has_submission_csv": has_sub, "namespace_vars": [k for k in GLOBAL_NS if not k.startswith("_")], "runtime_info": detect_hw()}))
     worker_state["status"] = "idle"
 
 async def main_daemon():
@@ -505,16 +526,29 @@ async def main_daemon():
                         if msg.get("event") == "broadcast":
                             ev = msg["payload"].get("event")
                             pl = msg["payload"].get("payload", {})
-                            if ev in ("run_cell", "stop_cell", "download_submission"):
+                            if ev in ("run_cell", "stop_cell", "download_submission", "upload_csv"):
                                 if pl.get("auth_token") != WORKER_SECRET:
                                     print("Rejected unauthorized command (invalid auth_token).")
                                     continue
                             if ev == "run_cell":
-                                stop_thread(worker_state["thread"])
+                                old_t = worker_state["thread"]
+                                if old_t and old_t.is_alive():
+                                    stop_thread(old_t)
+                                    old_t.join(timeout=1.5)
                                 t = threading.Thread(target=run_cell_job, args=(pl,), daemon=True)
                                 worker_state["thread"] = t; t.start()
                             elif ev == "stop_cell":
                                 stop_thread(worker_state["thread"])
+                            elif ev == "upload_csv":
+                                fname = os.path.basename(pl.get("filename", "dataset.csv"))
+                                content = pl.get("content", "")
+                                target_p = os.path.join("/tmp", fname)
+                                with open(target_p, "w", encoding="utf-8") as f:
+                                    f.write(content)
+                                if pl.get("also_cache_as_url"):
+                                    with open("/tmp/_cached_url_dataset.csv", "w", encoding="utf-8") as f:
+                                        f.write(content)
+                                print(f"Synced CSV from Web Studio -> {target_p} ({len(content):,} chars)")
                             elif ev == "download_submission":
                                 p = "/tmp/submission.csv" if os.path.exists("/tmp/submission.csv") else "submission.csv"
                                 if os.path.exists(p):
@@ -527,8 +561,8 @@ async def main_daemon():
                     while not log_q.empty():
                         st, tx = log_q.get_nowait()
                         (err_buf if st == "stderr" else out_buf).append(tx)
-                    if out_buf: await bcast("log_chunk", {"execution_id": worker_state["exec_id"], "stream": "stdout", "text": "".join(out_buf)})
-                    if err_buf: await bcast("log_chunk", {"execution_id": worker_state["exec_id"], "stream": "stderr", "text": "".join(err_buf)})
+                    if out_buf: await bcast("log_chunk", {"cell_id": worker_state["cell_id"], "execution_id": worker_state["exec_id"], "stream": "stdout", "text": "".join(out_buf)})
+                    if err_buf: await bcast("log_chunk", {"cell_id": worker_state["cell_id"], "execution_id": worker_state["exec_id"], "stream": "stderr", "text": "".join(err_buf)})
                     while not ev_q.empty():
                         et, ed = ev_q.get_nowait()
                         await bcast(et, ed)

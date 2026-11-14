@@ -29,15 +29,55 @@ export function normalizeDatasetUrl(rawUrl: string): string {
     return `https://raw.githubusercontent.com/${ghMatch[1]}/${ghMatch[2]}/${ghMatch[3]}`;
   }
 
-  // 2. Convert Google Drive share link to direct download link
-  const gdriveMatch = trimmed.match(
-    /\/file\/d\/([a-zA-Z0-9_-]+)/i
+  // 2. Convert Google Sheets link to CSV export link
+  const gsheetMatch = trimmed.match(
+    /^https?:\/\/docs\.google\.com\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/i
   );
-  if (gdriveMatch && trimmed.includes('drive.google.com')) {
-    return `https://drive.google.com/uc?export=download&id=${gdriveMatch[1]}`;
+  if (gsheetMatch) {
+    const gidMatch = trimmed.match(/[?&#]gid=([0-9]+)/i);
+    const gidParam = gidMatch ? `&gid=${gidMatch[1]}` : '';
+    return `https://docs.google.com/spreadsheets/d/${gsheetMatch[1]}/export?format=csv${gidParam}`;
+  }
+
+  // 3. Convert Google Drive share/open/uc links to direct download link
+  if (trimmed.includes('drive.google.com')) {
+    const fileMatch = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/i);
+    const idQueryMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/i);
+    const driveId = fileMatch?.[1] || idQueryMatch?.[1];
+    if (driveId) {
+      return `https://drive.google.com/uc?export=download&id=${driveId}`;
+    }
+  }
+
+  // 4. Convert Dropbox share link (?dl=0 -> ?dl=1)
+  if (/^https?:\/\/(www\.)?dropbox\.com\//i.test(trimmed)) {
+    if (/[?&]dl=0/i.test(trimmed)) {
+      return trimmed.replace(/([?&])dl=0/i, '$1dl=1');
+    }
+    if (!/[?&]dl=1/i.test(trimmed)) {
+      return trimmed + (trimmed.includes('?') ? '&dl=1' : '?dl=1');
+    }
   }
 
   return trimmed;
+}
+
+export function detectUnsupportedPlatformPage(rawUrl: string): string | null {
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    if (host === 'colab.research.google.com') {
+      return 'URL Google Colab là trang Notebook (.ipynb), không phải file CSV. Để dùng dữ liệu trên Colab, hãy chuyển sang tab "Colab / Kaggle" -> Connect Cloud và chọn file trong /content/ hoặc Google Drive.';
+    }
+    if (host === 'kaggle.com' || host === 'www.kaggle.com') {
+      if (!parsed.pathname.includes('/api/v1/')) {
+        return 'URL trang web Kaggle (datasets/competitions/code) trả về HTML và yêu cầu đăng nhập Kaggle. Hãy mở Public API hoặc chạy AMLICS Cloud Worker trực tiếp trên Kaggle Notebook để đọc thẳng /kaggle/input/...';
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export const onRequestGet = async (context: { request: Request }) => {
@@ -75,6 +115,14 @@ export const onRequestGet = async (context: { request: Request }) => {
     });
   }
 
+  const platformErr = detectUnsupportedPlatformPage(parsedTarget.toString());
+  if (platformErr) {
+    return new Response(JSON.stringify({ error: platformErr }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   try {
     const upstream = await fetch(parsedTarget.toString(), {
       headers: {
@@ -84,9 +132,13 @@ export const onRequestGet = async (context: { request: Request }) => {
     });
 
     if (!upstream.ok) {
+      const authHint =
+        upstream.status === 401 || upstream.status === 403
+          ? ' Link có thể đang để Private/Restricted. Hãy mở quyền Public ("Anyone with the link") hoặc tải trực tiếp qua Colab/Kaggle Cloud Worker.'
+          : '';
       return new Response(
         JSON.stringify({
-          error: `Remote server returned HTTP ${upstream.status} (${upstream.statusText})`,
+          error: `Remote server returned HTTP ${upstream.status} (${upstream.statusText}).${authHint}`,
         }),
         {
           status: upstream.status,
@@ -110,6 +162,25 @@ export const onRequestGet = async (context: { request: Request }) => {
     }
 
     const text = await upstream.text();
+    const contentType = (upstream.headers.get('content-type') || '').toLowerCase();
+    const trimmedHead = text.trimStart().slice(0, 512).toLowerCase();
+    if (
+      contentType.includes('text/html') ||
+      trimmedHead.startsWith('<!doctype html') ||
+      trimmedHead.startsWith('<html')
+    ) {
+      return new Response(
+        JSON.stringify({
+          error:
+            'URL trả về trang HTML (thường do link Google Drive/Sheets/Kaggle đang để Private yêu cầu đăng nhập, hoặc là trang web thay vì file CSV thô). Hãy bật chế độ Public ("Anyone with the link" -> Viewer) hoặc dùng Colab/Kaggle Cloud Runtime.',
+        }),
+        {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
     return new Response(text, {
       status: 200,
       headers: {

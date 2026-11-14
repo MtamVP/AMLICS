@@ -119,6 +119,7 @@ export function App() {
   const [cloudConnected, setCloudConnected] = useState<boolean>(false);
   const [cloudWorkerStatus, setCloudWorkerStatus] = useState<WorkerStatus>('offline');
   const [cloudHardware, setCloudHardware] = useState<HardwareInfo | null>(null);
+  const cloudSyncedKeysRef = useRef<Set<string>>(new Set());
   const [isCloudModalOpen, setIsCloudModalOpen] = useState<boolean>(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
   const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState<boolean>(false);
@@ -760,6 +761,49 @@ export function App() {
     };
   }, [sessionId, supabaseCreds, appendCliLog, handleIncomingCellResult, syncColumnsFromProfile]);
 
+  useEffect(() => {
+    if (!cloudConnected || cloudWorkerStatus === 'offline') {
+      cloudSyncedKeysRef.current.clear();
+      return;
+    }
+    const broker = cloudBrokerRef.current;
+    if (!broker) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const [cachedTrain, cachedTest] = await Promise.all([
+          loadCsvFileFromCache('train'),
+          loadCsvFileFromCache('test'),
+        ]);
+        if (cancelled) return;
+        const MAX_CLOUD_SYNC_BYTES = 4 * 1024 * 1024;
+        if (cachedTrain && cachedTrain.content.length <= MAX_CLOUD_SYNC_BYTES) {
+          const key = `${sessionId}:train:${cachedTrain.filename}:${cachedTrain.content.length}`;
+          if (!cloudSyncedKeysRef.current.has(key)) {
+            cloudSyncedKeysRef.current.add(key);
+            await broker.sendUploadCsv(cachedTrain.filename, cachedTrain.content, false, false);
+            appendCliLog('system', `[Cloud Sync] Synced ${cachedTrain.filename} to Colab/Kaggle /tmp/.`);
+          }
+        }
+        if (cachedTest && cachedTest.content.length <= MAX_CLOUD_SYNC_BYTES) {
+          const key = `${sessionId}:test:${cachedTest.filename}:${cachedTest.content.length}`;
+          if (!cloudSyncedKeysRef.current.has(key)) {
+            cloudSyncedKeysRef.current.add(key);
+            await broker.sendUploadCsv(cachedTest.filename, cachedTest.content, true, false);
+            appendCliLog('system', `[Cloud Sync] Synced test ${cachedTest.filename} to Colab/Kaggle /tmp/.`);
+          }
+        }
+      } catch {
+        // ignore cache sync errors
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudConnected, cloudWorkerStatus, sessionId, appendCliLog]);
+
   const executeSingleCell = useCallback(
     (cellId: string): Promise<boolean> => {
       const targetCell = cellsRef.current.find((c) => c.id === cellId);
@@ -1295,6 +1339,11 @@ ${metricLines}`;
     if (cloudBrokerRef.current?.isConfigured()) {
       publicUrl = await cloudBrokerRef.current.uploadCsvToStorage(file);
     }
+    if (cloudBrokerRef.current && cloudConnected && cloudWorkerStatus !== 'offline' && textContent.length <= 4 * 1024 * 1024) {
+      const key = `${sessionId}:train:${safeFilename}:${textContent.length}`;
+      cloudSyncedKeysRef.current.add(key);
+      void cloudBrokerRef.current.sendUploadCsv(safeFilename, textContent, false, false);
+    }
 
     setConfig((prev) => ({
       ...prev,
@@ -1334,6 +1383,12 @@ ${metricLines}`;
         isTestFile: true,
       },
     });
+
+    if (cloudBrokerRef.current && cloudConnected && cloudWorkerStatus !== 'offline' && textContent.length <= 4 * 1024 * 1024) {
+      const key = `${sessionId}:test:${safeFilename}:${textContent.length}`;
+      cloudSyncedKeysRef.current.add(key);
+      void cloudBrokerRef.current.sendUploadCsv(safeFilename, textContent, true, false);
+    }
 
     setConfig((prev) => ({
       ...prev,
