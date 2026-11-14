@@ -135,12 +135,12 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
           <span className="font-mono font-bold text-xs px-1.5 py-0.5 rounded bg-[#303134] text-[#e8eaed] border border-[#3c4043] tracking-tight shrink-0">
             AMLICS
           </span>
-          <div ref={wsMenuRef} className="relative flex items-center min-w-0">
+          <div ref={wsMenuRef} className="relative flex items-center shrink-0">
             <input
               type="text"
               value={projectName}
               onChange={(e) => onProjectNameChange(e.target.value)}
-              className="bg-transparent text-xs font-medium text-[#e8eaed] hover:bg-[#303134] focus:bg-[#303134] px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-[#8ab4f8] w-20 sm:w-28 xl:w-40 truncate"
+              className="bg-transparent text-xs font-medium text-[#e8eaed] hover:bg-[#303134] focus:bg-[#303134] px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-[#8ab4f8] w-20 sm:w-28 lg:w-36 truncate"
               title="Rename notebook"
             />
             <span className="hidden sm:inline text-xs text-[#9aa0a6] font-mono shrink-0">.ipynb</span>
@@ -332,8 +332,17 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             </div>
           )}
 
-          {/* Compact File Menu on half-screen / tablet / mobile (< 2xl) */}
-          <div ref={fileMenuRef} className="relative 2xl:hidden">
+          {/* Quick Upload CSV on desktop (xl+) */}
+          <button
+            type="button"
+            onClick={onUploadCsvClick}
+            className="hidden xl:inline-flex px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors whitespace-nowrap"
+          >
+            Upload CSV
+          </button>
+
+          {/* Compact File Menu (Colab-style "Tệp ▾") at all sizes */}
+          <div ref={fileMenuRef} className="relative">
             <button
               type="button"
               onClick={() => setFileMenuOpen((o) => !o)}
@@ -357,7 +366,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
                     setFileMenuOpen(false);
                     onUploadCsvClick();
                   }}
-                  className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043]"
+                  className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] xl:hidden"
                 >
                   Upload CSV
                 </button>
@@ -407,54 +416,16 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             )}
           </div>
 
-          {/* Inline File Actions on wide desktop (2xl+) */}
-          <div className="hidden 2xl:flex items-center gap-1">
+          {hasSubmissionCsv && (
             <button
               type="button"
-              onClick={onUploadCsvClick}
-              className="px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors whitespace-nowrap"
+              onClick={onDownloadSubmissionCsv}
+              className="hidden xl:inline-flex px-2 py-1 rounded text-xs font-mono bg-[#292a2d] hover:bg-[#35363a] text-[#81c995] border border-[#3c4043] transition-colors whitespace-nowrap"
+              title="Download generated Kaggle submission.csv"
             >
-              Upload CSV
+              ↓ submission.csv
             </button>
-
-            <button
-              type="button"
-              onClick={onImportIpynbClick}
-              className="px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors whitespace-nowrap"
-              title="Import an existing .ipynb file from Kaggle or Colab"
-            >
-              Import .ipynb
-            </button>
-
-            <button
-              type="button"
-              onClick={onExportIpynb}
-              className="px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors whitespace-nowrap"
-              title="Export notebook with all code, markdown, and plots to .ipynb"
-            >
-              Export .ipynb
-            </button>
-
-            <button
-              type="button"
-              onClick={onExportHtmlReport}
-              className="px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors whitespace-nowrap"
-              title="Export standalone HTML report with Leaderboard & all plots"
-            >
-              Report .html
-            </button>
-
-            {hasSubmissionCsv && (
-              <button
-                type="button"
-                onClick={onDownloadSubmissionCsv}
-                className="px-2 py-1 rounded text-xs font-mono bg-[#292a2d] hover:bg-[#35363a] text-[#81c995] border border-[#3c4043] transition-colors whitespace-nowrap"
-                title="Download generated Kaggle submission.csv"
-              >
-                ↓ submission.csv
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
 
