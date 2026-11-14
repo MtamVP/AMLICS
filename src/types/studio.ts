@@ -138,6 +138,13 @@ export type PipelineTemplateId =
   | 'timeseries_group_cv'
   | 'blank_notebook';
 
+export type QuickSnippetId =
+  | 'model_benchmark'
+  | 'dist_boxplots'
+  | 'corr_heatmap'
+  | 'missing_cardinality'
+  | 'groupby_pivot';
+
 export interface FeatureImportanceItem {
   feature: string;
   importance: number;

@@ -11,13 +11,19 @@ import {
   ChevronRight,
   Pencil,
 } from 'lucide-react';
-import { PIPELINE_TEMPLATES } from '../data/sampleDatasets';
-import { CellType, NotebookCell, PipelineTemplateId } from '../types/studio';
+import { PIPELINE_TEMPLATES, QUICK_SNIPPETS } from '../data/sampleDatasets';
+import {
+  CellType,
+  NotebookCell,
+  PipelineTemplateId,
+  QuickSnippetId,
+} from '../types/studio';
 import { renderSafeMarkdownToHtml } from '../utils/markdownRenderer';
 
 interface CenterNotebookPaneProps {
   cells: NotebookCell[];
   runningCellId: string | null;
+  activeDatasetName?: string;
   onRunCell: (cellId: string) => void;
   onRunFromCell: (cellId: string) => void;
   onStopCell: () => void;
@@ -30,11 +36,13 @@ interface CenterNotebookPaneProps {
   onDuplicateCell: (cellId: string) => void;
   onDeleteCell: (cellId: string) => void;
   onApplyTemplate: (templateId: PipelineTemplateId) => void;
+  onInsertQuickSnippet: (snippetId: QuickSnippetId) => void;
 }
 
 export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   cells,
   runningCellId,
+  activeDatasetName,
   onRunCell,
   onRunFromCell,
   onStopCell,
@@ -47,11 +55,13 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   onDuplicateCell,
   onDeleteCell,
   onApplyTemplate,
+  onInsertQuickSnippet,
 }) => {
   const [collapsedCells, setCollapsedCells] = useState<Record<string, boolean>>({});
   const [editingMarkdownIds, setEditingMarkdownIds] = useState<Record<string, boolean>>({});
   const [editingTitleCellId, setEditingTitleCellId] = useState<string | null>(null);
   const [showTemplatesBar, setShowTemplatesBar] = useState<boolean>(true);
+  const [showSnippetsBar, setShowSnippetsBar] = useState<boolean>(false);
 
   const toggleCollapse = (id: string) => {
     setCollapsedCells((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -91,14 +101,33 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
 
           <button
             type="button"
-            onClick={() => setShowTemplatesBar((v) => !v)}
+            onClick={() => {
+              setShowTemplatesBar((v) => !v);
+              setShowSnippetsBar(false);
+            }}
             className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
               showTemplatesBar
                 ? 'bg-[#292a2d] text-[#8ab4f8] border-[#8ab4f8]/50'
                 : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
             }`}
           >
-            Mẫu Pipeline có sẵn {showTemplatesBar ? '▾' : '▸'}
+            Mẫu Pipeline {showTemplatesBar ? '▾' : '▸'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setShowSnippetsBar((v) => !v);
+              setShowTemplatesBar(false);
+            }}
+            className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
+              showSnippetsBar
+                ? 'bg-[#292a2d] text-[#81c995] border-[#81c995]/50'
+                : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
+            }`}
+            title="Chèn nhanh cell vẽ đồ thị hoặc bảng so sánh theo dữ liệu vừa tải"
+          >
+            + Đồ thị & So sánh {showSnippetsBar ? '▾' : '▸'}
           </button>
 
           <span className="text-[#5f6368] hidden sm:inline">|</span>
@@ -117,7 +146,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
       {showTemplatesBar && (
         <div className="px-4 py-2 bg-[#202124]/80 border-b border-[#3c4043] flex items-center gap-1.5 overflow-x-auto shrink-0">
           <span className="text-[10px] font-mono text-[#9aa0a6] shrink-0 mr-1">
-            Chọn mẫu sinh code:
+            Mẫu cho {activeDatasetName ? activeDatasetName : 'dataset'}:
           </span>
           {PIPELINE_TEMPLATES.map((tpl) => (
             <button
@@ -128,6 +157,26 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
               className="px-2.5 py-1 rounded bg-[#292a2d] hover:bg-[#3c4043] border border-[#3c4043] hover:border-[#8ab4f8] text-[11px] text-[#e8eaed] hover:text-[#8ab4f8] font-mono shrink-0 transition-colors"
             >
               {tpl.shortLabel}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Quick Plots & Comparison Snippets Bar */}
+      {showSnippetsBar && (
+        <div className="px-4 py-2 bg-[#202124]/80 border-b border-[#3c4043] flex items-center gap-1.5 overflow-x-auto shrink-0">
+          <span className="text-[10px] font-mono text-[#81c995] shrink-0 mr-1">
+            Chèn cell cho {activeDatasetName ? activeDatasetName : 'df'}:
+          </span>
+          {QUICK_SNIPPETS.map((snip) => (
+            <button
+              key={snip.id}
+              type="button"
+              onClick={() => onInsertQuickSnippet(snip.id)}
+              title={snip.description}
+              className="px-2.5 py-1 rounded bg-[#292a2d] hover:bg-[#3c4043] border border-[#3c4043] hover:border-[#81c995] text-[11px] text-[#e8eaed] hover:text-[#81c995] font-mono shrink-0 transition-colors"
+            >
+              + {snip.label}
             </button>
           ))}
         </div>

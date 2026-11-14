@@ -1,4 +1,9 @@
-import { NotebookCell, PipelineConfig, PipelineTemplateId } from '../types/studio';
+import {
+  NotebookCell,
+  PipelineConfig,
+  PipelineTemplateId,
+  QuickSnippetId,
+} from '../types/studio';
 
 function formatPyList(items: string[]): string {
   if (items.length === 0) return '[]';
@@ -1081,5 +1086,222 @@ df.describe().round(3)`;
   return {
     nextConfig,
     cells: buildAllPipelineCells(nextConfig),
+  };
+}
+
+export function generateQuickSnippetCell(
+  snippetId: QuickSnippetId,
+  config: PipelineConfig,
+  order: number
+): NotebookCell {
+  const dsLabel = config.uploadedFileName || (config.publicDatasetUrl ? config.publicDatasetUrl.split('/').pop() : '') || 'dataset.csv';
+  const safeTarget = config.targetColumn.replace(/'/g, "\\'");
+  const numColsPy = formatPyList(config.numericColumns.slice(0, 6));
+  const firstCatCol = (config.categoricalColumns[0] || '').replace(/'/g, "\\'");
+  const isClass = config.taskType === 'classification';
+
+  let title = '';
+  let subtitle = '';
+  let code = '';
+
+  switch (snippetId) {
+    case 'model_benchmark':
+      title = `So sánh 4 Mô hình (${dsLabel})`;
+      subtitle = 'Bảng tổng hợp CV Score + Thời gian chạy + Biểu đồ cột';
+      code = `# So sánh nhanh các mô hình trên tập '${dsLabel}' (Target: '${safeTarget}')
+from sklearn.base import clone
+from sklearn.model_selection import cross_val_score
+from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor, RandomForestClassifier, RandomForestRegressor, ExtraTreesClassifier, ExtraTreesRegressor
+from sklearn.linear_model import LogisticRegression, Ridge
+
+if 'X_train' not in globals() or 'preprocessor' not in globals():
+    raise RuntimeError("Hãy chạy Cell Load Dataset, Cell Preprocess và Cell Split trước khi chạy Benchmark.")
+
+candidates = {
+    ${
+      isClass
+        ? `'LogisticRegression': LogisticRegression(max_iter=500, random_state=${config.hyperparameters.randomState}),
+    'RandomForest': RandomForestClassifier(n_estimators=100, max_depth=8, n_jobs=-1, random_state=${config.hyperparameters.randomState}),
+    'ExtraTrees': ExtraTreesClassifier(n_estimators=100, max_depth=8, n_jobs=-1, random_state=${config.hyperparameters.randomState}),
+    'HistGradientBoosting': HistGradientBoostingClassifier(max_iter=120, learning_rate=0.06, random_state=${config.hyperparameters.randomState})`
+        : `'RidgeRegression': Ridge(alpha=1.0, random_state=${config.hyperparameters.randomState}),
+    'RandomForest': RandomForestRegressor(n_estimators=100, max_depth=8, n_jobs=-1, random_state=${config.hyperparameters.randomState}),
+    'ExtraTrees': ExtraTreesRegressor(n_estimators=100, max_depth=8, n_jobs=-1, random_state=${config.hyperparameters.randomState}),
+    'HistGradientBoosting': HistGradientBoostingRegressor(max_iter=120, learning_rate=0.06, random_state=${config.hyperparameters.randomState})`
+    }
+}
+
+scoring_metric = '${isClass ? 'roc_auc' : 'neg_root_mean_squared_error'}'
+bench_rows = []
+
+for m_name, m_est in candidates.items():
+    t0 = time.perf_counter()
+    pipe = Pipeline([('preprocessor', clone(preprocessor)), ('model', m_est)])
+    scores = cross_val_score(pipe, X_train, y_train, cv=min(${config.cvFolds}, 3), scoring=scoring_metric)
+    if not ${isClass ? 'True' : 'False'}:
+        scores = -scores  # Convert neg_rmse to positive RMSE
+    elapsed_ms = int((time.perf_counter() - t0) * 1000)
+    bench_rows.append({
+        'Model': m_name,
+        'CV_Mean': round(float(scores.mean()), 4),
+        'CV_Std': round(float(scores.std()), 4),
+        'Time_ms': elapsed_ms
+    })
+
+bench_df = pd.DataFrame(bench_rows).sort_values('CV_Mean', ascending=${isClass ? 'False' : 'True'}).reset_index(drop=True)
+
+plt.style.use('dark_background')
+fig, ax = plt.subplots(figsize=(8.5, 3.2), dpi=115)
+fig.patch.set_facecolor('#202124')
+ax.set_facecolor('#18191a')
+ax.barh(bench_df['Model'][::-1], bench_df['CV_Mean'][::-1], xerr=bench_df['CV_Std'][::-1], color='#8ab4f8', height=0.55)
+ax.set_title(f"Model Benchmark on {DATASET_NAME if 'DATASET_NAME' in globals() else '${dsLabel}'} ({scoring_metric})", fontsize=10, color='#e8eaed')
+ax.grid(axis='x', alpha=0.15)
+plt.tight_layout()
+
+bench_df`;
+      break;
+
+    case 'dist_boxplots':
+      title = `Phân phối & Boxplot (${dsLabel})`;
+      subtitle = 'Histogram + Boxplot phát hiện ngoại lai trên các biến số';
+      code = `# Phân phối & Boxplot các cột số của '${dsLabel}'
+plot_cols = [c for c in ${numColsPy} if c in df.columns]
+if not plot_cols:
+    plot_cols = df.select_dtypes(include=[np.number]).columns.tolist()[:6]
+
+n_cols = min(len(plot_cols), 6)
+if n_cols == 0:
+    print("Không tìm thấy cột số nào để vẽ phân phối.")
+else:
+    plt.style.use('dark_background')
+    fig, axes = plt.subplots(n_cols, 2, figsize=(10.5, 2.5 * n_cols), dpi=110)
+    fig.patch.set_facecolor('#202124')
+    if n_cols == 1:
+        axes = np.array([axes])
+    for i, col in enumerate(plot_cols[:n_cols]):
+        s = df[col].dropna()
+        axes[i, 0].set_facecolor('#18191a')
+        axes[i, 0].hist(s, bins=25, color='#8ab4f8', edgecolor='#202124')
+        axes[i, 0].set_title(f'{col} — Histogram (skew={s.skew():.2f})', fontsize=9, color='#e8eaed')
+        axes[i, 0].grid(alpha=0.12)
+
+        axes[i, 1].set_facecolor('#18191a')
+        axes[i, 1].boxplot(s, vert=False, patch_artist=True, boxprops=dict(facecolor='#3c4043', color='#8ab4f8'), medianprops=dict(color='#fdd663'))
+        axes[i, 1].set_title(f'{col} — Boxplot (Outliers)', fontsize=9, color='#e8eaed')
+        axes[i, 1].grid(alpha=0.12)
+    plt.tight_layout()
+
+df[plot_cols[:6]].describe().T.round(3)`;
+      break;
+
+    case 'corr_heatmap':
+      title = `Tương quan & Target (${safeTarget})`;
+      subtitle = 'Correlation Heatmap + Biểu đồ tương quan với Target';
+      code = `# Ma trận tương quan & Mức độ liên hệ với Target '${safeTarget}'
+num_df = df.select_dtypes(include=[np.number])
+if num_df.shape[1] < 2:
+    print("Cần ít nhất 2 cột số để tính ma trận tương quan.")
+else:
+    corr_mat = num_df.iloc[:, :14].corr()
+    plt.style.use('dark_background')
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.3), dpi=115)
+    fig.patch.set_facecolor('#202124')
+
+    axes[0].set_facecolor('#18191a')
+    im = axes[0].imshow(corr_mat, cmap='coolwarm', vmin=-1, vmax=1)
+    axes[0].set_xticks(range(len(corr_mat.columns)))
+    axes[0].set_yticks(range(len(corr_mat.columns)))
+    axes[0].set_xticklabels(corr_mat.columns, rotation=45, ha='right', fontsize=8)
+    axes[0].set_yticklabels(corr_mat.columns, fontsize=8)
+    axes[0].set_title('Correlation Matrix', fontsize=10, color='#e8eaed')
+    fig.colorbar(im, ax=axes[0], fraction=0.046, pad=0.04)
+
+    axes[1].set_facecolor('#18191a')
+    if '${safeTarget}' in corr_mat.columns:
+        t_corr = corr_mat['${safeTarget}'].drop('${safeTarget}').sort_values()
+        colors = ['#81c995' if v >= 0 else '#f28b82' for v in t_corr.values]
+        axes[1].barh(t_corr.index, t_corr.values, color=colors, height=0.6)
+        axes[1].axvline(0, color='#5f6368', lw=1)
+        axes[1].set_title("Correlation with Target '${safeTarget}'", fontsize=10, color='#e8eaed')
+    else:
+        axes[1].text(0.5, 0.5, "Target '${safeTarget}' is non-numeric", ha='center', va='center', color='#9aa0a6')
+    axes[1].grid(axis='x', alpha=0.12)
+    plt.tight_layout()
+
+corr_mat.round(3)`;
+      break;
+
+    case 'missing_cardinality':
+      title = `Kiểm tra Missing & Cardinality (${dsLabel})`;
+      subtitle = 'Bảng chi tiết giá trị thiếu + Biểu đồ cột';
+      code = `# Bảng tổng hợp chất lượng dữ liệu cho '${dsLabel}'
+quality_df = pd.DataFrame({
+    'dtype': df.dtypes.astype(str),
+    'missing_cnt': df.isna().sum(),
+    'missing_pct (%)': (df.isna().sum() / max(len(df), 1) * 100).round(2),
+    'nunique': df.nunique(dropna=True),
+    'sample_val': [df[c].dropna().iloc[0] if df[c].notna().any() else None for c in df.columns]
+}).sort_values('missing_pct (%)', ascending=False)
+
+missing_nonzero = quality_df[quality_df['missing_pct (%)'] > 0]
+if len(missing_nonzero) > 0:
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(8.5, 3.0), dpi=115)
+    fig.patch.set_facecolor('#202124')
+    ax.set_facecolor('#18191a')
+    ax.barh(missing_nonzero.index[::-1], missing_nonzero['missing_pct (%)'][::-1], color='#fdd663', height=0.55)
+    ax.set_xlabel('Missing (%)', fontsize=9)
+    ax.set_title(f'Missing Values Breakdown ({len(missing_nonzero)} columns)', fontsize=10, color='#e8eaed')
+    ax.grid(axis='x', alpha=0.12)
+    plt.tight_layout()
+else:
+    print("Tuyệt vời: Không có cột nào bị thiếu dữ liệu (0% missing).")
+
+quality_df`;
+      break;
+
+    case 'groupby_pivot':
+      title = `Thống kê GroupBy (${firstCatCol || 'Nhóm'})`;
+      subtitle = 'Bảng Pivot tổng hợp Target theo nhóm phân loại';
+      code = `# Thống kê Target '${safeTarget}' theo nhóm phân loại của '${dsLabel}'
+group_col = '${firstCatCol}'
+if not group_col or group_col not in df.columns:
+    cat_cands = [c for c in df.select_dtypes(include=['object', 'category', 'bool']).columns if c != '${safeTarget}' and df[c].nunique() <= 20]
+    group_col = cat_cands[0] if cat_cands else None
+
+if not group_col:
+    print("Không tìm thấy cột phân loại phù hợp (<= 20 giá trị) để GroupBy.")
+else:
+    pivot_df = df.groupby(group_col, dropna=False)['${safeTarget}'].agg(['count', 'mean']).sort_values('count', ascending=False).head(12)
+    pivot_df['mean'] = pivot_df['mean'].round(4)
+
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(8.5, 3.2), dpi=115)
+    fig.patch.set_facecolor('#202124')
+    ax.set_facecolor('#18191a')
+    ax.bar(pivot_df.index.astype(str), pivot_df['mean'], color='#8ab4f8', width=0.55)
+    ax.set_title(f"Mean '${safeTarget}' by '{group_col}'", fontsize=10, color='#e8eaed')
+    ax.tick_params(axis='x', rotation=25)
+    ax.grid(axis='y', alpha=0.12)
+    plt.tight_layout()
+    pivot_df`;
+      break;
+  }
+
+  return {
+    id: `snip_${snippetId}_${Date.now()}`,
+    order,
+    cellType: 'code',
+    stepType: 'custom',
+    title,
+    subtitle,
+    customTitle: true,
+    generatedCode: code,
+    currentCode: code,
+    isLocked: true,
+    status: 'idle',
+    outputText: '',
+    figures: [],
   };
 }

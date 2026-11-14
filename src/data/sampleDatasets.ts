@@ -1,4 +1,38 @@
-import { PipelineConfig, PipelineTemplateId } from '../types/studio';
+import { PipelineConfig, PipelineTemplateId, QuickSnippetId } from '../types/studio';
+
+export interface QuickSnippetPreset {
+  id: QuickSnippetId;
+  label: string;
+  description: string;
+}
+
+export const QUICK_SNIPPETS: QuickSnippetPreset[] = [
+  {
+    id: 'model_benchmark',
+    label: 'So sánh nhiều Model (Bảng + Plot)',
+    description: 'Chạy thử 4 mô hình (Linear/Ridge, RandomForest, ExtraTrees, HistGB) bằng CV, xuất bảng so sánh và biểu đồ.',
+  },
+  {
+    id: 'dist_boxplots',
+    label: 'Vẽ Phân phối & Boxplot Outlier',
+    description: 'Vẽ Histogram và Boxplot cho các cột số của file vừa tải lên để phát hiện ngoại lai (outliers).',
+  },
+  {
+    id: 'corr_heatmap',
+    label: 'Ma trận Tương quan & Target',
+    description: 'Vẽ Correlation Heatmap và biểu đồ tương quan giữa các biến với cột Target.',
+  },
+  {
+    id: 'missing_cardinality',
+    label: 'Bảng & Biểu đồ Missing / Cardinality',
+    description: 'Tổng hợp tỷ lệ khuyết thiếu, kiểu dữ liệu, số giá trị duy nhất và vẽ biểu đồ cột.',
+  },
+  {
+    id: 'groupby_pivot',
+    label: 'Bảng Pivot theo nhóm (GroupBy)',
+    description: 'Thống kê giá trị trung bình Target theo từng nhóm của cột phân loại.',
+  },
+];
 
 export interface PublicDatasetPreset {
   id: string;

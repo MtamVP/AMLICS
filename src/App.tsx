@@ -11,6 +11,7 @@ import {
 import {
   buildAllPipelineCells,
   buildCellsFromTemplate,
+  generateQuickSnippetCell,
   normalizeUrlForPython,
 } from './engine/codeGenerator';
 import {
@@ -29,6 +30,7 @@ import {
   NotebookCell,
   PipelineConfig,
   PipelineTemplateId,
+  QuickSnippetId,
   RuntimeMode,
   SupabaseCredentials,
   WorkerStatus,
@@ -129,6 +131,8 @@ export function App() {
   configRef.current = config;
   const cellsRef = useRef(cells);
   cellsRef.current = cells;
+  const dataProfileRef = useRef(dataProfile);
+  dataProfileRef.current = dataProfile;
   const runtimeModeRef = useRef(runtimeMode);
   runtimeModeRef.current = runtimeMode;
   const cloudHardwareRef = useRef(cloudHardware);
@@ -400,7 +404,7 @@ export function App() {
             timestamp: new Date().toLocaleTimeString(),
             datasetName: String(
               experiment_record.dataset_name ||
-                dataProfile?.dataset_name ||
+                dataProfileRef.current?.dataset_name ||
                 'Dataset.csv'
             ),
             targetColumn: String(
@@ -462,7 +466,7 @@ export function App() {
         resolve(status === 'success');
       }
     },
-    [appendCliLog, dataProfile?.dataset_name]
+    [appendCliLog]
   );
 
   const initPyodideWorker = useCallback(() => {
@@ -524,6 +528,13 @@ export function App() {
                 : ''
             }`
           );
+          if (cellsRef.current.length === 0) {
+            setTimeout(() => {
+              setCells((prev) =>
+                prev.length === 0 ? buildAllPipelineCells(configRef.current) : prev
+              );
+            }, 0);
+          }
         }
       } else if (type === 'test_csv_uploaded') {
         appendCliLog(
@@ -685,10 +696,10 @@ export function App() {
       cloudBrokerRef.current?.persistStateToDb(
         configRef.current,
         cellsRef.current,
-        dataProfile
+        dataProfileRef.current
       );
     },
-    [runningCellId, executeSingleCell, dataProfile]
+    [runningCellId, executeSingleCell]
   );
 
   const handleRunAllCells = useCallback(async () => {
@@ -770,6 +781,21 @@ export function App() {
     appendCliLog(
       'system',
       `Applied pipeline template: ${templateId} (${newCells.length} cells generated).`
+    );
+  };
+
+  const handleInsertQuickSnippet = (snippetId: QuickSnippetId) => {
+    const newCell = generateQuickSnippetCell(
+      snippetId,
+      configRef.current,
+      cellsRef.current.length + 1
+    );
+    setCells((prev) => [...prev, newCell]);
+    appendCliLog(
+      'system',
+      `Inserted cell "${newCell.title}" tailored to ${
+        dataProfile?.dataset_name || configRef.current.uploadedFileName || 'dataset'
+      }.`
     );
   };
 
@@ -1174,6 +1200,7 @@ ${metricLines}`;
           <CenterNotebookPane
             cells={cells}
             runningCellId={runningCellId}
+            activeDatasetName={dataProfile?.dataset_name || config.uploadedFileName}
             onRunCell={executeSingleCell}
             onRunFromCell={handleRunFromCell}
             onStopCell={handleStopExecution}
@@ -1186,6 +1213,7 @@ ${metricLines}`;
             onDuplicateCell={handleDuplicateCell}
             onDeleteCell={handleDeleteCell}
             onApplyTemplate={handleApplyTemplate}
+            onInsertQuickSnippet={handleInsertQuickSnippet}
           />
         </div>
 
