@@ -340,6 +340,12 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               className="flex items-center gap-1 px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] border border-[#3c4043]/70 transition-colors whitespace-nowrap"
               title="Upload CSV, Import/Export .ipynb, Report .html"
             >
+              {hasSubmissionCsv && (
+                <span
+                  className="w-1.5 h-1.5 rounded-full bg-[#81c995] shrink-0"
+                  title="submission.csv đã sẵn sàng tải xuống"
+                />
+              )}
               <span>Tệp</span>
               <ChevronDown className="w-3 h-3 text-[#9aa0a6]" />
             </button>
