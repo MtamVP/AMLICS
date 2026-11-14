@@ -165,6 +165,13 @@ export const CloudConnectModal: React.FC<CloudConnectModalProps> = ({
                 Open Kaggle Notebooks ↗
               </a>
             </div>
+
+            <div className="mt-2 p-2.5 rounded bg-[#202124] border border-[#3c4043] text-[11px] text-[#9aa0a6] space-y-1">
+              <div className="font-medium text-[#e8eaed]">Lưu ý quan trọng khi chạy Colab / Kaggle:</div>
+              <div>• <span className="text-[#e8eaed]">Kaggle:</span> Bắt buộc bật <span className="text-[#fdd663]">Internet ON</span> ở thanh Settings bên phải Notebook để Worker cài thư viện và kết nối WebSocket. Dữ liệu cuộc thi tự động nhận ở <code className="text-[#8ab4f8]">/kaggle/input/...</code>.</div>
+              <div>• <span className="text-[#e8eaed]">Google Colab:</span> Để đọc file Drive cá nhân (Private), mount Drive bằng <code className="text-[#8ab4f8]">drive.mount('/content/drive')</code> trước khi chạy pipeline.</div>
+              <div>• <span className="text-[#e8eaed]">Import bằng URL:</span> Chỉ hỗ trợ link <b>Public</b> (Google Drive phải bật <i>"Anyone with the link"</i>). Link Private sẽ bị chặn 403.</div>
+            </div>
           </div>
 
           {/* Step 2: Supabase Endpoint */}

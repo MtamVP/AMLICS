@@ -59,6 +59,19 @@ export function normalizeDatasetUrl(rawUrl: string): string {
     }
   }
 
+  // 5. Convert HuggingFace dataset/repo blob URL -> resolve URL
+  const hfMatch = trimmed.match(
+    /^https?:\/\/huggingface\.co\/(datasets\/[^/]+\/[^/]+|[^/]+\/[^/]+)\/blob\/(.+)$/i
+  );
+  if (hfMatch) {
+    return `https://huggingface.co/${hfMatch[1]}/resolve/${hfMatch[2]}`;
+  }
+
+  // 6. Convert GitLab /-/blob/ -> /-/raw/
+  if (trimmed.includes('/-/blob/')) {
+    return trimmed.replace('/-/blob/', '/-/raw/');
+  }
+
   return trimmed;
 }
 
@@ -161,9 +174,36 @@ export const onRequestGet = async (context: { request: Request }) => {
       );
     }
 
-    const text = await upstream.text();
-    const contentType = (upstream.headers.get('content-type') || '').toLowerCase();
-    const trimmedHead = text.trimStart().slice(0, 512).toLowerCase();
+    let text = await upstream.text();
+    let contentType = (upstream.headers.get('content-type') || '').toLowerCase();
+    let trimmedHead = text.trimStart().slice(0, 512).toLowerCase();
+
+    // Handle Google Drive large-file virus-scan confirmation HTML page
+    if (
+      (contentType.includes('text/html') || trimmedHead.startsWith('<!doctype html') || trimmedHead.startsWith('<html')) &&
+      parsedTarget.hostname.includes('drive.google.com')
+    ) {
+      const idParam = parsedTarget.searchParams.get('id');
+      const uuidMatch = text.match(/name="uuid"\s+value="([^"]+)"/i) || text.match(/uuid=([a-zA-Z0-9_-]+)/i);
+      const confirmMatch = text.match(/name="confirm"\s+value="([^"]+)"/i) || text.match(/confirm=([a-zA-Z0-9_-]+)/i);
+      if (idParam && (uuidMatch || confirmMatch || text.includes('drive.usercontent.google.com'))) {
+        const confirmVal = confirmMatch?.[1] || 't';
+        const uuidPart = uuidMatch?.[1] ? `&uuid=${encodeURIComponent(uuidMatch[1])}` : '';
+        const retryUrl = `https://drive.usercontent.google.com/download?id=${encodeURIComponent(idParam)}&export=download&confirm=${encodeURIComponent(confirmVal)}${uuidPart}`;
+        const retryRes = await fetch(retryUrl, {
+          headers: {
+            'User-Agent': 'AMLICS-Dataset-Fetcher/1.0',
+            Accept: 'text/csv,text/plain,application/octet-stream,*/*',
+          },
+        });
+        if (retryRes.ok) {
+          text = await retryRes.text();
+          contentType = (retryRes.headers.get('content-type') || '').toLowerCase();
+          trimmedHead = text.trimStart().slice(0, 512).toLowerCase();
+        }
+      }
+    }
+
     if (
       contentType.includes('text/html') ||
       trimmedHead.startsWith('<!doctype html') ||

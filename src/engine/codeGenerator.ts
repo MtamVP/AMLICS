@@ -42,6 +42,15 @@ export function normalizeUrlForPython(rawUrl: string): string {
       return trimmed + (trimmed.includes('?') ? '&dl=1' : '?dl=1');
     }
   }
+  const hfMatch = trimmed.match(
+    /^https?:\/\/huggingface\.co\/(datasets\/[^/]+\/[^/]+|[^/]+\/[^/]+)\/blob\/(.+)$/i
+  );
+  if (hfMatch) {
+    return `https://huggingface.co/${hfMatch[1]}/resolve/${hfMatch[2]}`;
+  }
+  if (trimmed.includes('/-/blob/')) {
+    return trimmed.replace('/-/blob/', '/-/raw/');
+  }
   return trimmed;
 }
 
@@ -56,7 +65,7 @@ if not os.path.exists(csv_path):
     raise FileNotFoundError(
         f"Chưa tìm thấy file '{DATASET_NAME}'. Hãy bấm nút 'Upload CSV' (hoặc chọn tab Public URL) ở cột trái để nạp dữ liệu."
     )
-df = pd.read_csv(csv_path)`;
+df = _smart_read_csv(csv_path)`;
   } else if (config.datasetSource === 'cloud_path') {
     const cPath = (config.cloudDatasetPath.trim() || '/kaggle/input/dataset/train.csv').replace(
       /'/g,
@@ -68,7 +77,7 @@ df = pd.read_csv(csv_path)`;
       ? `pd.read_parquet('${cPath}')`
       : lowerPath.endsWith('.tsv')
       ? `pd.read_csv('${cPath}', sep='\\t')`
-      : `pd.read_csv('${cPath}')`;
+      : `_smart_read_csv('${cPath}')`;
     loadBlock = `DATASET_NAME = '${baseName}'
 if not os.path.exists('${cPath}'):
     raise FileNotFoundError(
@@ -85,9 +94,9 @@ df = ${readExpr}`;
 DATASET_URL = '${normUrl}'
 # Use cached file if pre-fetched in browser Wasm, otherwise read directly from URL
 if os.path.exists('/tmp/_cached_url_dataset.csv'):
-    df = pd.read_csv('/tmp/_cached_url_dataset.csv')
+    df = _smart_read_csv('/tmp/_cached_url_dataset.csv')
 else:
-    df = pd.read_csv(DATASET_URL)`;
+    df = _smart_read_csv(DATASET_URL)`;
   }
 
   const testLoadBlock = config.testUploadedFileName
@@ -96,7 +105,8 @@ else:
 TEST_DATASET_NAME = '${config.testUploadedFileName.replace(/'/g, "\\'")}'
 test_csv_path = f'/tmp/{TEST_DATASET_NAME}' if os.path.exists(f'/tmp/{TEST_DATASET_NAME}') else TEST_DATASET_NAME
 if os.path.exists(test_csv_path):
-    df_test = pd.read_csv(test_csv_path)
+    df_test = _smart_read_csv(test_csv_path)
+    df_test.replace([np.inf, -np.inf], np.nan, inplace=True)
     print(f"Test set: {TEST_DATASET_NAME} ({df_test.shape[0]:,} rows, {df_test.shape[1]} cols)")`
     : '';
 
@@ -129,7 +139,32 @@ import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore')
 
-${loadBlock}${testLoadBlock}${dropDupBlock}${subsampleBlock}
+def _smart_read_csv(path_or_url):
+    for enc in ('utf-8-sig', 'utf-8', 'latin1'):
+        try:
+            d = pd.read_csv(path_or_url, encoding=enc)
+            if d.shape[1] <= 1:
+                try:
+                    d_auto = pd.read_csv(path_or_url, sep=None, engine='python', encoding=enc)
+                    if d_auto.shape[1] > d.shape[1]:
+                        d = d_auto
+                except Exception:
+                    pass
+            d.columns = [str(c).lstrip('\\ufeff').strip() for c in d.columns]
+            return d
+        except UnicodeDecodeError:
+            continue
+        except Exception:
+            try:
+                d = pd.read_csv(path_or_url, sep=None, engine='python', encoding=enc)
+                d.columns = [str(c).lstrip('\\ufeff').strip() for c in d.columns]
+                return d
+            except Exception:
+                continue
+    return pd.read_csv(path_or_url)
+
+${loadBlock}
+df.replace([np.inf, -np.inf], np.nan, inplace=True)${testLoadBlock}${dropDupBlock}${subsampleBlock}
 
 print(f"Dataset : {DATASET_NAME} ({df.shape[0]:,} rows, {df.shape[1]} cols)")
 print(f"Target  : '${config.targetColumn.replace(/'/g, "\\'")}' | Task: ${config.taskType}")
@@ -898,7 +933,17 @@ _use_df_test = (
 if 'df_test' in globals() and isinstance(df_test, pd.DataFrame) and not _use_df_test:
     print("Note: Loaded df_test columns do not match trained features; using holdout X_test for submission.csv.")
 sub_source_df = df_test if _use_df_test else clean_df.loc[X_test.index]
-sub_X = sub_source_df[_req_cols] if len(_req_cols) > 0 else X_test.copy()
+if _use_df_test:
+    sub_X = sub_source_df[_req_cols].copy()
+    sub_X = sub_X.replace([np.inf, -np.inf], np.nan)
+    for _nc in numeric_features:
+        if _nc in sub_X.columns:
+            sub_X[_nc] = pd.to_numeric(sub_X[_nc].astype(str).str.replace(',', '', regex=False), errors='coerce') if sub_X[_nc].dtype == object else pd.to_numeric(sub_X[_nc], errors='coerce')
+    for _cc in categorical_features:
+        if _cc in sub_X.columns:
+            sub_X[_cc] = sub_X[_cc].where(sub_X[_cc].notna(), np.nan).apply(lambda _v: str(_v) if pd.notna(_v) else np.nan)
+else:
+    sub_X = X_test.copy()
 ${
   isClass
     ? `sub_preds = full_pipeline.predict_proba(sub_X)[:, 1] if hasattr(full_pipeline, "predict_proba") and len(np.unique(y_train)) == 2 else full_pipeline.predict(sub_X)`
