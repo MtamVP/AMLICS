@@ -77,7 +77,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
     isAuto(field) ? (
       <span
         title="Được chọn tự động bởi Smart Auto-Advisor / AI"
-        className="ml-1 px-1 py-0 rounded bg-[#8ab4f8]/15 border border-[#8ab4f8]/40 text-[#8ab4f8] font-mono text-[9px] leading-tight"
+        className="ml-1 px-1.5 py-0 rounded-full bg-[#8ab4f8]/10 border border-[#8ab4f8]/25 text-[#8ab4f8]/90 font-mono text-[9px] leading-tight"
       >
         Auto
       </span>
@@ -139,29 +139,29 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
     : null;
 
   return (
-    <aside className="w-full h-full bg-[#202124] border-r border-[#3c4043] flex flex-col overflow-hidden select-none">
+    <aside className="w-full h-full bg-[#1e1f23] border-r border-white/[0.08] flex flex-col overflow-hidden select-none">
       {/* Header */}
-      <div className="px-3.5 py-2.5 border-b border-[#3c4043] flex items-center justify-between">
-        <span className="text-xs font-semibold text-[#e8eaed]">
+      <div className="px-3.5 py-2.5 border-b border-white/[0.08] flex items-center justify-between">
+        <span className="text-xs font-semibold tracking-tight text-[#e8eaed]">
           Pipeline Configuration
         </span>
-        <span className="text-[11px] font-mono text-[#9aa0a6]">
-          sklearn.pipeline
+        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/[0.05] text-[#9aa0a6]">
+          sklearn
         </span>
       </div>
 
       {/* Smart Auto-Advisor */}
       {dataProfile && (
-        <div className="px-3 py-2 bg-[#18191a] border-b border-[#3c4043] space-y-1.5">
+        <div className="px-3.5 py-2.5 bg-[#18191c] border-b border-white/[0.07] space-y-1.5">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] font-mono text-[#8ab4f8] truncate">
+            <span className="text-[11px] font-mono text-[#8ab4f8]/90 truncate">
               {taskInference?.reason || `Task: ${config.taskType}`}
             </span>
             <button
               type="button"
               onClick={onAutoOptimize}
               title="Tự động chọn toàn bộ preprocessing, CV, model & tham số tối ưu cho điểm cao nhất"
-              className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] text-[10px] font-semibold transition-colors cursor-pointer"
+              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#18191a] text-[10px] font-semibold transition-colors cursor-pointer shadow-sm"
             >
               <Sparkles className="w-3 h-3" />
               <span>Auto-Optimize</span>
@@ -169,11 +169,11 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
           </div>
           {config.autoSelectedFields && config.autoSelectedFields.length > 0 && (
             <div className="text-[10px] text-[#9aa0a6] leading-tight">
-              Đang bật <span className="text-[#8ab4f8] font-mono">[Auto]</span> cho{' '}
-              <span className="text-[#e8eaed] font-mono">
+              Đang bật <span className="text-[#8ab4f8] font-mono">Auto</span> cho{' '}
+              <span className="text-[#e8eaed] font-mono tabular-nums">
                 {config.autoSelectedFields.length}
               </span>{' '}
-              mục (chỉnh tay sẽ tự gỡ nhãn Auto).
+              mục (chỉnh tay sẽ tự gỡ).
             </div>
           )}
         </div>
@@ -219,7 +219,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
       )}
 
       {/* Accordion Steps */}
-      <div className="flex-1 overflow-y-auto divide-y divide-[#3c4043] custom-scrollbar">
+      <div className="flex-1 overflow-y-auto divide-y divide-white/[0.06] custom-scrollbar">
         {/* ==================== 1. DATASET & TARGET ==================== */}
         <div>
           <button

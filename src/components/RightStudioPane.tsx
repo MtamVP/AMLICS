@@ -197,13 +197,13 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
   const warnings = dataProfile?.warnings || [];
 
   return (
-    <aside className="w-full h-full bg-[#202124] border-l border-[#3c4043] flex flex-col overflow-hidden select-none">
+    <aside className="w-full h-full bg-[#1e1f23] border-l border-white/[0.08] flex flex-col overflow-hidden select-none">
       {/* Tab Strip */}
-      <div className="px-3 border-b border-[#3c4043] flex items-center gap-4 text-xs shrink-0">
+      <div className="px-3 border-b border-white/[0.08] flex items-center gap-3.5 text-xs shrink-0 overflow-x-auto custom-scrollbar whitespace-nowrap">
         <button
           type="button"
           onClick={() => setActiveTab('leaderboard')}
-          className={`py-2.5 border-b-2 transition-colors ${
+          className={`py-2.5 border-b-2 transition-colors shrink-0 ${
             activeTab === 'leaderboard'
               ? 'border-[#8ab4f8] text-[#8ab4f8] font-medium'
               : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
@@ -215,27 +215,27 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('diagnostics')}
-          className={`py-2.5 border-b-2 transition-colors ${
+          className={`py-2.5 border-b-2 transition-colors shrink-0 ${
             activeTab === 'diagnostics'
               ? 'border-[#8ab4f8] text-[#8ab4f8] font-medium'
               : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
           }`}
         >
-          Plots & Importance
+          Plots &amp; Importance
         </button>
 
         <button
           type="button"
           onClick={() => setActiveTab('data')}
-          className={`py-2.5 border-b-2 transition-colors flex items-center gap-1 ${
+          className={`py-2.5 border-b-2 transition-colors flex items-center gap-1 shrink-0 ${
             activeTab === 'data'
               ? 'border-[#8ab4f8] text-[#8ab4f8] font-medium'
               : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
           }`}
         >
-          <span>Data & Warnings</span>
+          <span>Data &amp; Warnings</span>
           {warnings.length > 0 && (
-            <span className="px-1 rounded-sm bg-[#3c4043] text-[#fdd663] font-mono text-[10px]">
+            <span className="px-1.5 py-0 rounded-full bg-[#fdd663]/15 text-[#fdd663] font-mono text-[10px]">
               {warnings.length}
             </span>
           )}
@@ -244,7 +244,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab('predict')}
-          className={`py-2.5 border-b-2 transition-colors ${
+          className={`py-2.5 border-b-2 transition-colors shrink-0 ${
             activeTab === 'predict'
               ? 'border-[#81c995] text-[#81c995] font-medium'
               : 'border-transparent text-[#9aa0a6] hover:text-[#e8eaed]'
@@ -255,17 +255,17 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#18191a] custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 bg-[#16171a] custom-scrollbar">
         {/* ==================== TAB 1: LEADERBOARD ==================== */}
         {activeTab === 'leaderboard' && (
           <div className="space-y-3">
             {onRunTournament && (
-              <div className="p-2.5 rounded bg-[#202124] border border-[#3c4043] flex items-center justify-between gap-2">
+              <div className="p-3 rounded-lg bg-[#202126] border border-white/[0.08] flex items-center justify-between gap-2.5">
                 <div className="min-w-0">
-                  <div className="text-[11px] font-medium text-[#e8eaed]">
+                  <div className="text-[11px] font-semibold text-[#e8eaed]">
                     Auto-Tournament (So sánh đa mô hình)
                   </div>
-                  <div className="text-[10px] text-[#9aa0a6]">
+                  <div className="text-[10px] text-[#9aa0a6] leading-snug mt-0.5">
                     Tự động train Linear, RandomForest, ExtraTrees &amp; HistGB rồi xếp hạng.
                   </div>
                 </div>
@@ -273,7 +273,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                   <button
                     type="button"
                     onClick={onStopTournament}
-                    className="px-2.5 py-1 rounded bg-[#f28b82]/20 border border-[#f28b82]/50 text-[#f28b82] text-[11px] font-medium shrink-0 hover:bg-[#f28b82]/30"
+                    className="px-2.5 py-1.5 rounded-md bg-[#f28b82]/15 border border-[#f28b82]/40 text-[#f28b82] text-[11px] font-medium shrink-0 hover:bg-[#f28b82]/25 transition-colors"
                   >
                     Stop
                   </button>
@@ -281,7 +281,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                   <button
                     type="button"
                     onClick={onRunTournament}
-                    className="px-2.5 py-1 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#202124] text-[11px] font-semibold shrink-0"
+                    className="px-2.5 py-1.5 rounded-md bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#18191a] text-[11px] font-semibold shrink-0 transition-colors shadow-sm"
                   >
                     Compare 4 Models
                   </button>

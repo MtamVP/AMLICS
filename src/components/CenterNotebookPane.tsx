@@ -621,14 +621,14 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                   }}
                   onClick={(e) => handleCellSelect(cell.id, e)}
                   onDoubleClick={() => toggleMarkdownEdit(cell.id, true)}
-                  className={`rounded border overflow-hidden transition-colors ${
+                  className={`rounded-lg border overflow-hidden transition-all ${
                     isMultiSelected
-                      ? 'border-[#8ab4f8] bg-[#8ab4f8]/[0.04]'
-                      : 'border-[#3c4043] hover:border-[#5f6368] bg-[#202124]'
+                      ? 'border-[#8ab4f8]/70 bg-[#8ab4f8]/[0.04] shadow-[0_0_0_1px_rgba(138,180,248,0.12)]'
+                      : 'border-white/[0.08] hover:border-white/[0.16] bg-[#1e1f23]'
                   }`}
                 >
                   {/* Markdown Cell Header */}
-                  <div className="px-3 py-1 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between gap-2 text-[11px]">
+                  <div className="px-3 py-1.5 bg-[#23252a] border-b border-white/[0.06] flex items-center justify-between gap-2 text-[11px]">
                     <div className="flex items-center gap-2 text-[#9aa0a6] min-w-0 flex-1">
                       <span className="font-mono shrink-0">[md]</span>
                       {isEditingTitle ? (
@@ -743,18 +743,18 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                   cellRefs.current[cell.id] = el;
                 }}
                 onClick={(e) => handleCellSelect(cell.id, e)}
-                className={`rounded border transition-colors overflow-hidden bg-[#202124] ${
+                className={`rounded-lg border transition-all overflow-hidden bg-[#1e1f23] ${
                   isRunning
-                    ? 'border-[#8ab4f8]'
+                    ? 'border-[#8ab4f8]/80 shadow-[0_0_0_1px_rgba(138,180,248,0.18)]'
                     : cell.status === 'error'
                     ? 'border-[#f28b82]/60'
                     : isMultiSelected || activeCellId === cell.id
-                    ? 'border-[#8ab4f8] border-l-2 border-l-[#8ab4f8]'
-                    : 'border-[#3c4043] hover:border-[#5f6368]'
+                    ? 'border-[#8ab4f8]/60 border-l-2 border-l-[#8ab4f8] shadow-[0_0_0_1px_rgba(138,180,248,0.12)]'
+                    : 'border-white/[0.08] hover:border-white/[0.16]'
                 }`}
               >
                 {/* Code Cell Header */}
-                <div className="sticky top-0 z-10 px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between gap-2 text-xs">
+                <div className="sticky top-0 z-10 px-3 py-1.5 bg-[#23252a] border-b border-white/[0.06] flex items-center justify-between gap-2 text-xs">
                   <div className="flex items-center gap-2 min-w-0 flex-1">
                     {/* Colab Play / Stop Bracket */}
                     {isRunning ? (
