@@ -4,29 +4,175 @@ import {
   PipelineConfig,
 } from '../types/studio';
 
-export type AiProvider = 'gemini' | 'openai';
+export type AiProvider = 'gemini' | 'gpt' | 'deepseek';
 
-const PROVIDER_KEY = 'amlics_byok_provider_v1';
-const API_KEY_STORAGE = 'amlics_byok_key_v1';
-
-export function getStoredAiSettings(): { provider: AiProvider; apiKey: string } {
-  try {
-    const provider =
-      (localStorage.getItem(PROVIDER_KEY) as AiProvider) || 'gemini';
-    const apiKey = localStorage.getItem(API_KEY_STORAGE) || '';
-    return { provider, apiKey };
-  } catch {
-    return { provider: 'gemini', apiKey: '' };
-  }
+export interface ProviderMeta {
+  id: AiProvider;
+  label: string;
+  tagline: string;
+  keyPlaceholder: string;
+  keyUrl: string;
+  defaultModel: string;
+  models: { id: string; note: string }[];
 }
 
-export function saveAiSettings(provider: AiProvider, apiKey: string): void {
+export const PROVIDER_CATALOG: Record<AiProvider, ProviderMeta> = {
+  gemini: {
+    id: 'gemini',
+    label: 'Gemini',
+    tagline: 'Google AI Studio',
+    keyPlaceholder: 'AIzaSy...',
+    keyUrl: 'https://aistudio.google.com/apikey',
+    defaultModel: 'gemini-3.6-flash',
+    models: [
+      { id: 'gemini-3.6-flash', note: 'Cân bằng tốc độ & chất lượng' },
+      { id: 'gemini-3.8-flash', note: 'Flash thế hệ mới, suy luận mạnh' },
+      { id: 'gemini-3.5-flash-lite', note: 'Nhẹ, nhanh, tiết kiệm quota' },
+      { id: 'gemini-3.1-flash-lite', note: 'Flash-Lite ổn định' },
+      { id: 'gemini-4-hydrogen', note: 'Thế hệ 4 mới nhất' },
+      { id: 'gemini-2.5-flash', note: 'Fallback tương thích cũ' },
+    ],
+  },
+  gpt: {
+    id: 'gpt',
+    label: 'GPT',
+    tagline: 'OpenAI Platform',
+    keyPlaceholder: 'sk-proj-...',
+    keyUrl: 'https://platform.openai.com/api-keys',
+    defaultModel: 'gpt-6.1-terra',
+    models: [
+      { id: 'gpt-6.1-terra', note: 'Nhanh, cân bằng chi phí & hiệu năng' },
+      { id: 'gpt-6.1-sol', note: 'Mạnh cho code & khoa học dữ liệu' },
+      { id: 'gpt-6-astra', note: 'Flagship suy luận sâu nhất' },
+      { id: 'gpt-6-luna', note: 'Siêu tiết kiệm, tốc độ cao' },
+      { id: 'gpt-5.6-sol', note: 'GPT-5.6 dòng Sol' },
+      { id: 'gpt-5.6-terra', note: 'GPT-5.6 dòng Terra' },
+      { id: 'gpt-5.6-luna', note: 'GPT-5.6 dòng Luna' },
+    ],
+  },
+  deepseek: {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    tagline: 'DeepSeek API',
+    keyPlaceholder: 'sk-...',
+    keyUrl: 'https://platform.deepseek.com/api_keys',
+    defaultModel: 'deepseek-flash',
+    models: [
+      { id: 'deepseek-flash', note: 'Mặc định nhanh, hỗ trợ thinking' },
+      { id: 'deepseek-v4-pro', note: 'Logic & code chuyên sâu' },
+      { id: 'deepseek-chat', note: 'Alias tương thích cũ' },
+      { id: 'deepseek-reasoner', note: 'Reasoning alias cũ' },
+    ],
+  },
+};
+
+export interface StoredByokState {
+  activeProvider: AiProvider;
+  keys: Record<AiProvider, string>;
+  models: Record<AiProvider, string>;
+}
+
+const STORAGE_V2_KEY = 'amlics_byok_profiles_v2';
+const LEGACY_PROVIDER_KEY = 'amlics_byok_provider_v1';
+const LEGACY_API_KEY = 'amlics_byok_key_v1';
+
+export function getStoredByokState(): StoredByokState {
+  const defaults: StoredByokState = {
+    activeProvider: 'gemini',
+    keys: { gemini: '', gpt: '', deepseek: '' },
+    models: {
+      gemini: PROVIDER_CATALOG.gemini.defaultModel,
+      gpt: PROVIDER_CATALOG.gpt.defaultModel,
+      deepseek: PROVIDER_CATALOG.deepseek.defaultModel,
+    },
+  };
+
   try {
-    localStorage.setItem(PROVIDER_KEY, provider);
-    localStorage.setItem(API_KEY_STORAGE, apiKey.trim());
+    const raw = localStorage.getItem(STORAGE_V2_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<StoredByokState>;
+      return {
+        activeProvider:
+          parsed.activeProvider && parsed.activeProvider in PROVIDER_CATALOG
+            ? parsed.activeProvider
+            : 'gemini',
+        keys: { ...defaults.keys, ...(parsed.keys || {}) },
+        models: { ...defaults.models, ...(parsed.models || {}) },
+      };
+    }
+
+    // Migrate legacy v1
+    const oldProv = localStorage.getItem(LEGACY_PROVIDER_KEY);
+    const oldKey = localStorage.getItem(LEGACY_API_KEY) || '';
+    if (oldKey) {
+      const mapped: AiProvider = oldProv === 'openai' ? 'gpt' : 'gemini';
+      defaults.activeProvider = mapped;
+      defaults.keys[mapped] = oldKey;
+    }
   } catch {
     // ignore
   }
+  return defaults;
+}
+
+export function saveByokState(state: StoredByokState): void {
+  try {
+    localStorage.setItem(STORAGE_V2_KEY, JSON.stringify(state));
+  } catch {
+    // ignore
+  }
+}
+
+export async function fetchProviderModels(
+  provider: AiProvider,
+  apiKey: string
+): Promise<string[]> {
+  const key = apiKey.trim();
+  if (!key) {
+    throw new Error('Hãy nhập API Key trước khi tải danh sách model.');
+  }
+
+  if (provider === 'gemini') {
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`
+    );
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error(`Không tải được model Gemini (${resp.status}): ${txt.slice(0, 180)}`);
+    }
+    const data = await resp.json();
+    const list: string[] = (data?.models || [])
+      .filter((m: { supportedGenerationMethods?: string[] }) =>
+        m.supportedGenerationMethods?.includes('generateContent')
+      )
+      .map((m: { name: string }) => m.name.replace(/^models\//, ''));
+    return list;
+  }
+
+  const endpoint =
+    provider === 'deepseek'
+      ? 'https://api.deepseek.com/v1/models'
+      : 'https://api.openai.com/v1/models';
+
+  const resp = await fetch(endpoint, {
+    headers: { Authorization: `Bearer ${key}` },
+  });
+  if (!resp.ok) {
+    const txt = await resp.text();
+    throw new Error(
+      `Không tải được model ${PROVIDER_CATALOG[provider].label} (${resp.status}): ${txt.slice(0, 180)}`
+    );
+  }
+  const data = await resp.json();
+  const ids: string[] = (data?.data || [])
+    .map((m: { id: string }) => m.id)
+    .filter((id: string) =>
+      provider === 'gpt'
+        ? /^(gpt-|o[1-9]|chatgpt)/i.test(id)
+        : Boolean(id)
+    )
+    .sort();
+  return ids;
 }
 
 function buildSchemaSummary(
@@ -53,8 +199,8 @@ function buildSchemaSummary(
 
   return JSON.stringify(
     {
-      dataset: profile?.dataset_name || config.uploadedFileName || 'dataset.csv',
-      shape: profile?.shape,
+      dataset: profile?.dataset_name || config.uploadedFileName || 'unknown',
+      shape: profile?.shape || null,
       targetColumn: config.targetColumn,
       taskType: config.taskType,
       numericColumns: config.numericColumns,
@@ -71,19 +217,23 @@ function buildSchemaSummary(
 async function callLlm(
   provider: AiProvider,
   apiKey: string,
+  model: string,
   systemPrompt: string,
   userPrompt: string,
   expectJson: boolean
 ): Promise<string> {
   const key = apiKey.trim();
   if (!key) {
-    throw new Error('Vui lòng nhập API Key (Gemini hoặc OpenAI) trước khi gọi AI.');
+    throw new Error(
+      `Vui lòng nhập API Key cho ${PROVIDER_CATALOG[provider].label} trước khi gọi AI.`
+    );
   }
+  const activeModel = (model || PROVIDER_CATALOG[provider].defaultModel).trim();
 
   if (provider === 'gemini') {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(
-      key
-    )}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      activeModel
+    )}:generateContent?key=${encodeURIComponent(key)}`;
     const resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -99,7 +249,7 @@ async function callLlm(
 
     if (!resp.ok) {
       const errText = await resp.text();
-      throw new Error(`Gemini API lỗi (${resp.status}): ${errText.slice(0, 220)}`);
+      throw new Error(`Gemini (${activeModel}) lỗi ${resp.status}: ${errText.slice(0, 220)}`);
     }
     const data = await resp.json();
     const txt = data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -107,15 +257,19 @@ async function callLlm(
     return txt;
   }
 
-  // OpenAI
-  const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+  const endpoint =
+    provider === 'deepseek'
+      ? 'https://api.deepseek.com/v1/chat/completions'
+      : 'https://api.openai.com/v1/chat/completions';
+
+  const resp = await fetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${key}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: activeModel,
       temperature: 0.25,
       ...(expectJson ? { response_format: { type: 'json_object' } } : {}),
       messages: [
@@ -127,11 +281,13 @@ async function callLlm(
 
   if (!resp.ok) {
     const errText = await resp.text();
-    throw new Error(`OpenAI API lỗi (${resp.status}): ${errText.slice(0, 220)}`);
+    throw new Error(
+      `${PROVIDER_CATALOG[provider].label} (${activeModel}) lỗi ${resp.status}: ${errText.slice(0, 220)}`
+    );
   }
   const data = await resp.json();
   const txt = data?.choices?.[0]?.message?.content;
-  if (!txt) throw new Error('OpenAI không trả về nội dung hợp lệ.');
+  if (!txt) throw new Error(`${PROVIDER_CATALOG[provider].label} không trả về nội dung hợp lệ.`);
   return txt;
 }
 
@@ -154,6 +310,7 @@ export interface AiOptimizationPlan {
 export async function askAiToOptimizePipeline(
   provider: AiProvider,
   apiKey: string,
+  model: string,
   profile: DataProfile | null,
   config: PipelineConfig,
   experiments: ExperimentRecord[],
@@ -171,7 +328,7 @@ Allowed enum values:
 - imbalanceStrategy: "none" | "class_weight" | "random_oversample" | "random_undersample"
 - modelFamily: "HistGradientBoosting" | "GradientBoosting" | "RandomForest" | "ExtraTrees" | "LinearModel" | "MLPNeuralNet" | "LightGBM" | "XGBoost" | "CatBoost"
 - tuningStrategy: "none" | "randomized_search" | "grid_search"
-- hyperparameters: { nEstimators (30-500), learningRate (0.01-0.3), maxDepth (2-20), minSamplesLeaf (1-50), l2Regularization (0-10), subsample (0.5-1.0) }
+- hyperparameters: { nEstimators (30-500), learningRate (0.01-0.3), maxDepth (2-20), minSamplesLeaf (1-50), l2Regularization (0-10), subsample (0.5-1.0), earlyStopping (boolean) }
 - explanation: concise Vietnamese explanation (2-3 sentences) why these choices maximize the score.`;
 
   const userMsg = `Schema & Recent Runs:\n${buildSchemaSummary(
@@ -180,7 +337,7 @@ Allowed enum values:
     experiments
   )}\n\nUser goal: ${userGoal || 'Tối ưu điểm CV/Holdout cao nhất, chống overfitting và data leakage.'}`;
 
-  const raw = await callLlm(provider, apiKey, sys, userMsg, true);
+  const raw = await callLlm(provider, apiKey, model, sys, userMsg, true);
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
   return JSON.parse(cleaned) as AiOptimizationPlan;
 }
@@ -188,6 +345,7 @@ Allowed enum values:
 export async function askAiToGenerateCode(
   provider: AiProvider,
   apiKey: string,
+  model: string,
   profile: DataProfile | null,
   config: PipelineConfig,
   experiments: ExperimentRecord[],
@@ -203,7 +361,7 @@ Respond strictly with JSON: { "title": "short Vietnamese cell title", "code": "v
     experiments
   )}\n${lastErrorText ? `\nRecent Error:\n${lastErrorText}\n` : ''}\nRequest: ${prompt}`;
 
-  const raw = await callLlm(provider, apiKey, sys, userMsg, true);
+  const raw = await callLlm(provider, apiKey, model, sys, userMsg, true);
   const cleaned = raw.replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
   return JSON.parse(cleaned) as {
     title: string;
