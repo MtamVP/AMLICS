@@ -60,9 +60,10 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
   });
   const [fetchingModels, setFetchingModels] = useState(false);
   const [customPrompt, setCustomPrompt] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const loading = loadingAction !== null;
 
   useEffect(() => {
     if (isOpen) {
@@ -139,7 +140,11 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
   };
 
   const handleAutoOptimize = async () => {
-    setLoading(true);
+    if (!hasKey) {
+      setErrorMsg(`Vui lòng nhập ${meta.label} API Key ở bước 2 trước khi gọi AI.`);
+      return;
+    }
+    setLoadingAction('optimize');
     setErrorMsg(null);
     setStatusMsg(null);
     saveByokState(byok);
@@ -161,17 +166,24 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   };
 
-  const handleGenerateCell = async (presetPrompt?: string) => {
+  const handleGenerateCell = async (
+    presetPrompt?: string,
+    actionKey: 'fe' | 'diagnose' | 'custom' = 'custom'
+  ) => {
+    if (!hasKey) {
+      setErrorMsg(`Vui lòng nhập ${meta.label} API Key ở bước 2 trước khi gọi AI.`);
+      return;
+    }
     const promptToSend = (presetPrompt || customPrompt).trim();
     if (!promptToSend) {
       setErrorMsg('Hãy nhập yêu cầu hoặc chọn 1 tác vụ gợi ý bên dưới.');
       return;
     }
-    setLoading(true);
+    setLoadingAction(actionKey);
     setErrorMsg(null);
     setStatusMsg(null);
     saveByokState(byok);
@@ -187,12 +199,14 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
         lastErrorText
       );
       onInsertAiCell(res.title || 'AI Generated Cell', res.code);
-      setStatusMsg(`Đã chèn cell "${res.title}": ${res.explanation}`);
+      setStatusMsg(
+        `[${meta.label} • ${currentModel}] Đã chèn cell "${res.title}": ${res.explanation}`
+      );
       if (!presetPrompt) setCustomPrompt('');
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      setLoadingAction(null);
     }
   };
 
@@ -419,13 +433,21 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <button
                 type="button"
-                disabled={loading || !hasKey}
+                disabled={loading}
                 onClick={handleAutoOptimize}
-                className="p-3 rounded-md bg-[#8ab4f8] hover:bg-[#aecbfa] disabled:opacity-45 text-[#202124] text-left transition-colors cursor-pointer"
+                className="p-3 rounded-md bg-[#8ab4f8] hover:bg-[#aecbfa] disabled:opacity-50 text-[#202124] text-left transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-1.5 font-semibold text-xs">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>AI Auto-Optimize</span>
+                  <Sparkles
+                    className={`w-3.5 h-3.5 ${
+                      loadingAction === 'optimize' ? 'animate-spin' : ''
+                    }`}
+                  />
+                  <span>
+                    {loadingAction === 'optimize'
+                      ? 'Đang gọi AI...'
+                      : 'AI Auto-Optimize'}
+                  </span>
                 </div>
                 <div className="text-[10px] opacity-85 mt-1 leading-snug">
                   Tự chọn model, CV, preprocessing &amp; tham số tối ưu + gắn nhãn [Auto].
@@ -434,17 +456,26 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
 
               <button
                 type="button"
-                disabled={loading || !hasKey}
+                disabled={loading}
                 onClick={() =>
                   handleGenerateCell(
-                    'Viết Python feature engineering tạo 3-5 đặc trưng mới có ý nghĩa dựa trên các cột hiện có của df, không rò rỉ target.'
+                    'Viết Python feature engineering tạo 3-5 đặc trưng mới có ý nghĩa dựa trên các cột hiện có của df, không rò rỉ target.',
+                    'fe'
                   )
                 }
-                className="p-3 rounded-md bg-[#292a2d] hover:bg-[#35363a] disabled:opacity-45 border border-[#3c4043] text-[#e8eaed] text-left transition-colors cursor-pointer"
+                className="p-3 rounded-md bg-[#292a2d] hover:bg-[#35363a] disabled:opacity-50 border border-[#3c4043] text-[#e8eaed] text-left transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-1.5 font-semibold text-xs text-[#81c995]">
-                  <Code2 className="w-3.5 h-3.5" />
-                  <span>+ Feature Eng. Cell</span>
+                  <Code2
+                    className={`w-3.5 h-3.5 ${
+                      loadingAction === 'fe' ? 'animate-pulse' : ''
+                    }`}
+                  />
+                  <span>
+                    {loadingAction === 'fe'
+                      ? 'Đang sinh code...'
+                      : '+ Feature Eng. Cell'}
+                  </span>
                 </div>
                 <div className="text-[10px] text-[#9aa0a6] mt-1 leading-snug">
                   Sinh cell Python tạo feature mới dựa trên schema cột hiện tại.
@@ -453,19 +484,30 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
 
               <button
                 type="button"
-                disabled={loading || !hasKey}
+                disabled={loading}
                 onClick={() =>
                   handleGenerateCell(
                     lastErrorText
                       ? 'Phân tích lỗi gần nhất và viết đoạn code sửa lỗi hoặc kiểm tra dữ liệu an toàn.'
-                      : 'Viết code kiểm tra nhanh các yếu tố có thể làm giảm điểm CV (leakage, outliers, skewness) và gợi ý cải thiện.'
+                      : 'Viết code kiểm tra nhanh các yếu tố có thể làm giảm điểm CV (leakage, outliers, skewness) và gợi ý cải thiện.',
+                    'diagnose'
                   )
                 }
-                className="p-3 rounded-md bg-[#292a2d] hover:bg-[#35363a] disabled:opacity-45 border border-[#3c4043] text-[#e8eaed] text-left transition-colors cursor-pointer"
+                className="p-3 rounded-md bg-[#292a2d] hover:bg-[#35363a] disabled:opacity-50 border border-[#3c4043] text-[#e8eaed] text-left transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-1.5 font-semibold text-xs text-[#fdd663]">
-                  <Wrench className="w-3.5 h-3.5" />
-                  <span>{lastErrorText ? 'Chẩn đoán lỗi' : 'Audit Pipeline'}</span>
+                  <Wrench
+                    className={`w-3.5 h-3.5 ${
+                      loadingAction === 'diagnose' ? 'animate-spin' : ''
+                    }`}
+                  />
+                  <span>
+                    {loadingAction === 'diagnose'
+                      ? 'Đang phân tích...'
+                      : lastErrorText
+                      ? 'Chẩn đoán lỗi'
+                      : 'Audit Pipeline'}
+                  </span>
                 </div>
                 <div className="text-[10px] text-[#9aa0a6] mt-1 leading-snug">
                   {lastErrorText
@@ -474,6 +516,25 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
                 </div>
               </button>
             </div>
+
+            {loading && (
+              <div className="p-2.5 rounded-md bg-[#8ab4f8]/10 border border-[#8ab4f8]/40 text-[#8ab4f8] text-[11px] font-mono flex items-center gap-2">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                <span>
+                  Đang gửi schema tới {meta.label} ({currentModel})...
+                </span>
+              </div>
+            )}
+            {statusMsg && (
+              <div className="p-2.5 rounded-md bg-[#81c995]/10 border border-[#81c995]/40 text-[#81c995] text-[11px] leading-relaxed">
+                {statusMsg}
+              </div>
+            )}
+            {errorMsg && (
+              <div className="p-2.5 rounded-md bg-[#f28b82]/10 border border-[#f28b82]/40 text-[#f28b82] text-[11px] font-mono whitespace-pre-wrap">
+                {errorMsg}
+              </div>
+            )}
           </div>
 
           {/* Custom Prompt */}
@@ -491,25 +552,16 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
               </span>
               <button
                 type="button"
-                disabled={loading || !hasKey}
-                onClick={() => handleGenerateCell()}
-                className="px-3.5 py-1.5 rounded bg-[#303134] hover:bg-[#3c4043] disabled:opacity-45 border border-[#8ab4f8]/50 text-[#8ab4f8] font-medium cursor-pointer"
+                disabled={loading}
+                onClick={() => handleGenerateCell(undefined, 'custom')}
+                className="px-3.5 py-1.5 rounded bg-[#303134] hover:bg-[#3c4043] disabled:opacity-50 border border-[#8ab4f8]/50 text-[#8ab4f8] font-medium cursor-pointer"
               >
-                {loading ? 'AI đang xử lý...' : 'Gửi yêu cầu & Sinh Cell'}
+                {loadingAction === 'custom'
+                  ? 'AI đang xử lý...'
+                  : 'Gửi yêu cầu & Sinh Cell'}
               </button>
             </div>
           </div>
-
-          {statusMsg && (
-            <div className="p-2.5 rounded-md bg-[#81c995]/10 border border-[#81c995]/40 text-[#81c995] text-[11px] leading-relaxed">
-              {statusMsg}
-            </div>
-          )}
-          {errorMsg && (
-            <div className="p-2.5 rounded-md bg-[#f28b82]/10 border border-[#f28b82]/40 text-[#f28b82] text-[11px] font-mono whitespace-pre-wrap">
-              {errorMsg}
-            </div>
-          )}
         </div>
       </div>
     </div>
