@@ -93,3 +93,41 @@ on conflict (id) do nothing;
 drop policy if exists "Public Access to datasets bucket" on storage.objects;
 create policy "Public Access to datasets bucket" on storage.objects
     for all using (bucket_id = 'datasets') with check (bucket_id = 'datasets');
+
+-- 6. Bảng AMLICS_NOTEBOOKS: Đồng bộ toàn bộ Notebook độc lập xuyên nhiều máy (Config, Cells, DataProfile, Experiments/Leaderboard)
+create table if not exists public.amlics_notebooks (
+    sync_key text not null,
+    id text not null,
+    name text not null default 'AMLICS_Pipeline_Notebook',
+    config jsonb not null default '{}'::jsonb,
+    cells jsonb not null default '[]'::jsonb,
+    data_profile jsonb default null,
+    experiments jsonb not null default '[]'::jsonb,
+    selected_exp_id text default null,
+    train_dataset_url text default null,
+    test_dataset_url text default null,
+    updated_at timestamptz not null default now(),
+    primary key (sync_key, id)
+);
+
+-- 7. Bảng AMLICS_USER_SETTINGS: Đồng bộ kho API Key AI (Gemini/GPT/DeepSeek), Active Notebook & Tuỳ chọn giao diện
+create table if not exists public.amlics_user_settings (
+    sync_key text primary key,
+    active_workspace_id text default null,
+    byok_state jsonb not null default '{}'::jsonb,
+    ui_preferences jsonb not null default '{}'::jsonb,
+    updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_amlics_notebooks_sync on public.amlics_notebooks(sync_key, updated_at desc);
+
+alter table public.amlics_notebooks enable row level security;
+alter table public.amlics_user_settings enable row level security;
+
+drop policy if exists "Allow public access to amlics_notebooks" on public.amlics_notebooks;
+create policy "Allow public access to amlics_notebooks" on public.amlics_notebooks
+    for all using (true) with check (true);
+
+drop policy if exists "Allow public access to amlics_user_settings" on public.amlics_user_settings;
+create policy "Allow public access to amlics_user_settings" on public.amlics_user_settings
+    for all using (true) with check (true);

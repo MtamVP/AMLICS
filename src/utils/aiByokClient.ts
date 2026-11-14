@@ -176,9 +176,12 @@ export function getStoredByokState(): StoredByokState {
   return defaults;
 }
 
-export function saveByokState(state: StoredByokState): void {
+export function saveByokState(state: StoredByokState, skipSyncEvent = false): void {
   try {
     localStorage.setItem(STORAGE_V2_KEY, JSON.stringify(state));
+    if (!skipSyncEvent && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('amlics:byok-updated', { detail: state }));
+    }
   } catch {
     // ignore
   }

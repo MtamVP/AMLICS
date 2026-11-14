@@ -32,6 +32,21 @@ import {
   SupabaseCloudBroker,
 } from './engine/supabaseCloudClient';
 import {
+  deleteNotebookFromSupabase,
+  downloadCsvTextFromSyncUrl,
+  getOrInitSyncKey,
+  pullAllFromSupabase,
+  pushNotebookToSupabase,
+  pushUserSettingsToSupabase,
+  saveSyncKey,
+  uploadCsvTextToSyncStorage,
+} from './engine/supabaseSyncService';
+import {
+  getStoredByokState,
+  saveByokState,
+  StoredByokState,
+} from './utils/aiByokClient';
+import {
   CellType,
   CliLogEntry,
   ConfigProvenance,
@@ -70,6 +85,8 @@ interface StoredWorkspaceSnapshot extends NotebookWorkspaceMeta {
   dataProfile: DataProfile | null;
   experiments?: ExperimentRecord[];
   selectedExpId?: string | null;
+  trainDatasetUrl?: string | null;
+  testDatasetUrl?: string | null;
 }
 
 function triggerBrowserDownload(filename: string, textContent: string) {
@@ -183,6 +200,12 @@ export function App() {
   const [supabaseCreds, setSupabaseCreds] = useState<SupabaseCredentials>(() =>
     getStoredSupabaseCredentials()
   );
+  const [syncKey, setSyncKey] = useState<string>(() => getOrInitSyncKey());
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle');
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncNeedsSchema, setSyncNeedsSchema] = useState<boolean>(false);
+  const cloudSyncBootedRef = useRef<boolean>(false);
+  const skipNextCloudPushRef = useRef<boolean>(false);
   const [cloudConnected, setCloudConnected] = useState<boolean>(false);
   const [cloudWorkerStatus, setCloudWorkerStatus] = useState<WorkerStatus>('offline');
   const [cloudHardware, setCloudHardware] = useState<HardwareInfo | null>(null);
@@ -271,8 +294,11 @@ export function App() {
   const ipynbInputRef = useRef<HTMLInputElement | null>(null);
   const lastProfileDatasetRef = useRef<string>('');
   const workspaceHydratedRef = useRef<boolean>(false);
+  const [isWorkspaceHydrated, setIsWorkspaceHydrated] = useState<boolean>(false);
   const pendingPresetRef = useRef<PublicDatasetPreset | null>(null);
 
+  const workspacesRef = useRef(workspaces);
+  workspacesRef.current = workspaces;
   const configRef = useRef(config);
   configRef.current = config;
   const cellsRef = useRef(cells);
@@ -360,6 +386,7 @@ export function App() {
         }
       }
       workspaceHydratedRef.current = true;
+      setIsWorkspaceHydrated(true);
 
       const expectedTrainName = activeWs?.config?.uploadedFileName || '';
       const shouldRestoreCachedTrain =
@@ -1618,6 +1645,26 @@ ${metricLines}`;
       void cloudBrokerRef.current.sendUploadCsv(safeFilename, textContent, false, false);
     }
 
+    if (textContent.length <= 15 * 1024 * 1024) {
+      void uploadCsvTextToSyncStorage(
+        supabaseCreds,
+        syncKey,
+        activeWorkspaceId,
+        'train',
+        safeFilename,
+        textContent
+      ).then((syncUrl) => {
+        const finalUrl = syncUrl || publicUrl;
+        if (finalUrl) {
+          setWorkspaces((prev) =>
+            prev.map((w) =>
+              w.id === activeWorkspaceId ? { ...w, trainDatasetUrl: finalUrl } : w
+            )
+          );
+        }
+      });
+    }
+
     configProvenanceRef.current = 'ai_copilot';
     setConfig((prev) => ({
       ...prev,
@@ -1662,6 +1709,25 @@ ${metricLines}`;
       const key = `${sessionId}:test:${safeFilename}:${textContent.length}`;
       cloudSyncedKeysRef.current.add(key);
       void cloudBrokerRef.current.sendUploadCsv(safeFilename, textContent, true, false);
+    }
+
+    if (textContent.length <= 15 * 1024 * 1024) {
+      void uploadCsvTextToSyncStorage(
+        supabaseCreds,
+        syncKey,
+        activeWorkspaceId,
+        'test',
+        safeFilename,
+        textContent
+      ).then((syncUrl) => {
+        if (syncUrl) {
+          setWorkspaces((prev) =>
+            prev.map((w) =>
+              w.id === activeWorkspaceId ? { ...w, testDatasetUrl: syncUrl } : w
+            )
+          );
+        }
+      });
     }
 
     configProvenanceRef.current = 'ai_copilot';
@@ -1858,6 +1924,7 @@ ${metricLines}`;
     setExperiments(target.experiments || []);
     setSelectedExpId(target.selectedExpId ?? null);
     resetRuntimeForWorkspaceSwitch();
+    void restoreCsvsForWorkspaceFromUrls(target);
     appendCliLog('system', `Đã chuyển sang notebook độc lập: ${target.name}.ipynb`);
   };
 
@@ -1932,7 +1999,278 @@ ${metricLines}`;
       setSelectedExpId(nextWs.selectedExpId ?? null);
       resetRuntimeForWorkspaceSwitch();
     }
+    void deleteNotebookFromSupabase(supabaseCreds, syncKey, targetId);
   };
+
+  // ==================== FULL SUPABASE CROSS-DEVICE SYNC ====================
+  const restoreCsvsForWorkspaceFromUrls = useCallback(
+    async (ws: StoredWorkspaceSnapshot) => {
+      if (!pyodideWorkerRef.current) return;
+      if (ws.trainDatasetUrl && ws.config?.uploadedFileName) {
+        const csvText = await downloadCsvTextFromSyncUrl(ws.trainDatasetUrl);
+        if (csvText) {
+          await saveCsvFileToCache('train', ws.config.uploadedFileName, csvText);
+          pyodideWorkerRef.current.postMessage({
+            type: 'write_csv',
+            payload: {
+              filename: ws.config.uploadedFileName,
+              content: csvText,
+              isTestFile: false,
+              silentRestore: true,
+            },
+          });
+        }
+      }
+      if (ws.testDatasetUrl && ws.config?.testUploadedFileName) {
+        const testText = await downloadCsvTextFromSyncUrl(ws.testDatasetUrl);
+        if (testText) {
+          await saveCsvFileToCache('test', ws.config.testUploadedFileName, testText);
+          pyodideWorkerRef.current.postMessage({
+            type: 'write_csv',
+            payload: {
+              filename: ws.config.testUploadedFileName,
+              content: testText,
+              isTestFile: true,
+              silentRestore: true,
+            },
+          });
+        }
+      }
+    },
+    []
+  );
+
+  const handlePullAllFromCloud = useCallback(
+    async (overrideSyncKey?: string, forceApply = true) => {
+      const keyToUse = overrideSyncKey || syncKey;
+      if (!supabaseCreds.url || !supabaseCreds.anonKey) return;
+      setSyncStatus('syncing');
+      const res = await pullAllFromSupabase(supabaseCreds, keyToUse);
+      if (!res.ok) {
+        setSyncNeedsSchema(Boolean(res.needsSchema));
+        setSyncStatus('error');
+        setSyncMessage(
+          res.needsSchema
+            ? 'Cần chạy SQL tạo 2 bảng amlics_notebooks & amlics_user_settings trong Supabase.'
+            : `Lỗi tải Supabase: ${res.error || 'Unknown'}`
+        );
+        return;
+      }
+      setSyncNeedsSchema(Boolean(res.needsSchema));
+
+      // Apply remote BYOK AI keys if available
+      if (res.byokState) {
+        const localByok = getStoredByokState();
+        const remoteHasKeys = Object.values(res.byokState.keyVaults || {}).some(
+          (arr) => Array.isArray(arr) && arr.length > 0
+        );
+        const localHasKeys = Object.values(localByok.keyVaults || {}).some(
+          (arr) => Array.isArray(arr) && arr.length > 0
+        );
+        if (forceApply || remoteHasKeys || !localHasKeys) {
+          saveByokState(res.byokState, true);
+        }
+      }
+
+      if (res.notebooks.length > 0) {
+        const localOnlyBlankDefault =
+          workspaces.length === 1 &&
+          workspaces[0].id === 'ws_default' &&
+          !workspaces[0].dataProfile &&
+          (workspaces[0].experiments?.length || 0) === 0;
+        const latestRemoteTs = Math.max(...res.notebooks.map((n) => n.updatedAt || 0));
+        const latestLocalTs = Math.max(...workspaces.map((w) => w.updatedAt || 0));
+
+        if (forceApply || localOnlyBlankDefault || latestRemoteTs > latestLocalTs + 2000) {
+          skipNextCloudPushRef.current = true;
+          const mapped: StoredWorkspaceSnapshot[] = res.notebooks.map((n) => ({
+            ...n,
+            cells: n.cells && n.cells.length > 0 ? n.cells : buildAllPipelineCells(n.config, []),
+          }));
+          setWorkspaces(mapped);
+          try {
+            localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(mapped));
+          } catch {
+            // ignore
+          }
+          const targetWs =
+            mapped.find((m) => m.id === res.activeWorkspaceId) || mapped[0];
+          if (targetWs) {
+            try {
+              localStorage.setItem(ACTIVE_WS_STORAGE_KEY, targetWs.id);
+            } catch {
+              // ignore
+            }
+            setActiveWorkspaceId(targetWs.id);
+            setProjectName(targetWs.name);
+            setConfig(targetWs.config);
+            lastProfileDatasetRef.current = targetWs.dataProfile?.dataset_name || '';
+            setDataProfile(targetWs.dataProfile);
+            setCells(targetWs.cells);
+            setActiveCellId(targetWs.cells[0]?.id || null);
+            setExperiments(targetWs.experiments || []);
+            setSelectedExpId(targetWs.selectedExpId ?? null);
+            resetRuntimeForWorkspaceSwitch();
+            void restoreCsvsForWorkspaceFromUrls(targetWs);
+          }
+        }
+      }
+
+      setSyncStatus('synced');
+      setSyncMessage(
+        `Đã đồng bộ từ Supabase (${res.notebooks.length} notebooks • mã: ${keyToUse})`
+      );
+    },
+    [syncKey, supabaseCreds, workspaces, resetRuntimeForWorkspaceSwitch, restoreCsvsForWorkspaceFromUrls]
+  );
+
+  const handlePushAllToCloud = useCallback(async () => {
+    if (!supabaseCreds.url || !supabaseCreds.anonKey) return;
+    setSyncStatus('syncing');
+    const currentSnapshot: StoredWorkspaceSnapshot = {
+      ...(workspaces.find((w) => w.id === activeWorkspaceId) || {
+        id: activeWorkspaceId,
+        name: projectName,
+        updatedAt: Date.now(),
+        config,
+        cells,
+        dataProfile,
+      }),
+      name: projectName,
+      updatedAt: Date.now(),
+      config,
+      cells: cells.map((c) => ({ ...c, figures: [] })),
+      dataProfile,
+      experiments,
+      selectedExpId,
+    };
+
+    const allToPush = workspaces.some((w) => w.id === activeWorkspaceId)
+      ? workspaces.map((w) => (w.id === activeWorkspaceId ? currentSnapshot : w))
+      : [...workspaces, currentSnapshot];
+
+    let lastErr: string | undefined;
+    let needsSchema = false;
+    for (const ws of allToPush) {
+      const r = await pushNotebookToSupabase(supabaseCreds, syncKey, ws);
+      if (!r.ok) {
+        lastErr = r.error;
+        if (r.needsSchema) needsSchema = true;
+      }
+    }
+    const setRes = await pushUserSettingsToSupabase(supabaseCreds, syncKey, {
+      activeWorkspaceId,
+      byokState: getStoredByokState(),
+      uiPreferences: { runtimeMode },
+    });
+    if (!setRes.ok) {
+      lastErr = setRes.error;
+      if (setRes.needsSchema) needsSchema = true;
+    }
+
+    if (lastErr || needsSchema) {
+      setSyncNeedsSchema(needsSchema);
+      setSyncStatus('error');
+      setSyncMessage(
+        needsSchema
+          ? 'Supabase chưa có 2 bảng đồng bộ mới — bấm Copy SQL bên dưới để tạo.'
+          : `Lỗi đẩy Supabase: ${lastErr}`
+      );
+      return;
+    }
+
+    setSyncNeedsSchema(false);
+    setSyncStatus('synced');
+    setSyncMessage(
+      `Đã lưu ${allToPush.length} notebooks & kho API Key lên Supabase (${new Date().toLocaleTimeString()})`
+    );
+  }, [
+    supabaseCreds,
+    syncKey,
+    workspaces,
+    activeWorkspaceId,
+    projectName,
+    config,
+    cells,
+    dataProfile,
+    experiments,
+    selectedExpId,
+    runtimeMode,
+  ]);
+
+  // Initial pull from Supabase once hydrated
+  useEffect(() => {
+    if (!isWorkspaceHydrated || cloudSyncBootedRef.current) return;
+    cloudSyncBootedRef.current = true;
+    void handlePullAllFromCloud(syncKey, false);
+  }, [isWorkspaceHydrated, handlePullAllFromCloud, syncKey]);
+
+  // Debounced auto-push active workspace & settings to Supabase
+  useEffect(() => {
+    if (!isWorkspaceHydrated || !cloudSyncBootedRef.current) return;
+    if (skipNextCloudPushRef.current) {
+      skipNextCloudPushRef.current = false;
+      return;
+    }
+    const timer = window.setTimeout(async () => {
+      const existing = workspacesRef.current.find((w) => w.id === activeWorkspaceId);
+      const snapshot: StoredWorkspaceSnapshot = {
+        id: activeWorkspaceId,
+        name: projectName,
+        updatedAt: Date.now(),
+        config,
+        cells: cells.map((c) => ({ ...c, figures: [] })),
+        dataProfile,
+        experiments,
+        selectedExpId,
+        trainDatasetUrl: existing?.trainDatasetUrl ?? null,
+        testDatasetUrl: existing?.testDatasetUrl ?? null,
+      };
+      const r = await pushNotebookToSupabase(supabaseCreds, syncKey, snapshot);
+      const s = await pushUserSettingsToSupabase(supabaseCreds, syncKey, {
+        activeWorkspaceId,
+      });
+      if (r.needsSchema || s.needsSchema) {
+        setSyncNeedsSchema(true);
+        setSyncStatus('error');
+      } else if (r.ok && s.ok) {
+        setSyncNeedsSchema(false);
+        setSyncStatus('synced');
+        setSyncMessage(`Đã tự động đồng bộ Supabase (${new Date().toLocaleTimeString()})`);
+      }
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [
+    isWorkspaceHydrated,
+    activeWorkspaceId,
+    projectName,
+    config,
+    cells,
+    dataProfile,
+    experiments,
+    selectedExpId,
+    syncKey,
+    supabaseCreds,
+  ]);
+
+  // Listen for BYOK key vault edits and sync immediately to Supabase
+  useEffect(() => {
+    const onByokUpdated = (evt: Event) => {
+      const detail = (evt as CustomEvent<StoredByokState>).detail;
+      void pushUserSettingsToSupabase(supabaseCreds, syncKey, {
+        byokState: detail || getStoredByokState(),
+      }).then((r) => {
+        if (r.needsSchema) {
+          setSyncNeedsSchema(true);
+          setSyncStatus('error');
+        } else if (r.ok) {
+          setSyncStatus('synced');
+        }
+      });
+    };
+    window.addEventListener('amlics:byok-updated', onByokUpdated);
+    return () => window.removeEventListener('amlics:byok-updated', onByokUpdated);
+  }, [supabaseCreds, syncKey]);
 
   const handleAutoOptimize = () => {
     if (!dataProfile) {
@@ -2675,6 +3013,17 @@ ${metricLines}`;
         workerStatus={cloudWorkerStatus}
         hardwareInfo={cloudHardware}
         onPingWorker={() => cloudBrokerRef.current?.sendPing()}
+        syncKey={syncKey}
+        onChangeSyncKey={(nextKey) => {
+          const saved = saveSyncKey(nextKey);
+          setSyncKey(saved);
+          void handlePullAllFromCloud(saved, true);
+        }}
+        syncStatus={syncStatus}
+        syncMessage={syncMessage}
+        syncNeedsSchema={syncNeedsSchema}
+        onPushAllToCloud={handlePushAllToCloud}
+        onPullAllFromCloud={() => void handlePullAllFromCloud(syncKey, true)}
       />
 
       <AiByokModal

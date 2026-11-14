@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Cloud, Copy, Download, RefreshCw, Upload, X } from 'lucide-react';
 import { generateOneClickColabScript } from '../engine/supabaseCloudClient';
+import { SYNC_MIGRATION_SQL } from '../engine/supabaseSyncService';
 import { HardwareInfo, SupabaseCredentials, WorkerStatus } from '../types/studio';
 import { downloadCloudRunnerIpynb } from '../utils/ipynbExporter';
 
@@ -15,6 +16,13 @@ interface CloudConnectModalProps {
   workerStatus: WorkerStatus;
   hardwareInfo: HardwareInfo | null;
   onPingWorker: () => void;
+  syncKey: string;
+  onChangeSyncKey: (nextKey: string) => void;
+  syncStatus: 'idle' | 'syncing' | 'synced' | 'error';
+  syncMessage: string | null;
+  syncNeedsSchema: boolean;
+  onPushAllToCloud: () => void;
+  onPullAllFromCloud: () => void;
 }
 
 export const CloudConnectModal: React.FC<CloudConnectModalProps> = ({
@@ -28,11 +36,28 @@ export const CloudConnectModal: React.FC<CloudConnectModalProps> = ({
   workerStatus,
   hardwareInfo,
   onPingWorker,
+  syncKey,
+  onChangeSyncKey,
+  syncStatus,
+  syncMessage,
+  syncNeedsSchema,
+  onPushAllToCloud,
+  onPullAllFromCloud,
 }) => {
   const [urlInput, setUrlInput] = useState(credentials.url);
   const [keyInput, setKeyInput] = useState(credentials.anonKey);
+  const [syncKeyDraft, setSyncKeyDraft] = useState(syncKey);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      setSyncKeyDraft(syncKey);
+      setUrlInput(credentials.url);
+      setKeyInput(credentials.anonKey);
+    }
+  }, [isOpen, syncKey, credentials.url, credentials.anonKey]);
 
   if (!isOpen) return null;
 
@@ -72,6 +97,114 @@ export const CloudConnectModal: React.FC<CloudConnectModalProps> = ({
 
         {/* Body */}
         <div className="p-4 overflow-y-auto space-y-4 text-xs custom-scrollbar">
+          {/* Cross-Device Supabase Full Persistence Section */}
+          <div className="p-3 rounded-lg bg-[#18191a] border border-[#8ab4f8]/30 space-y-2.5">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Cloud className="w-4 h-4 text-[#8ab4f8]" />
+                <span className="font-semibold text-[#e8eaed]">
+                  Đồng bộ Toàn bộ Web lên Supabase (Đa máy)
+                </span>
+              </div>
+              <span
+                className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                  syncStatus === 'synced'
+                    ? 'bg-[#81c995]/15 border-[#81c995]/40 text-[#81c995]'
+                    : syncStatus === 'syncing'
+                    ? 'bg-[#fdd663]/15 border-[#fdd663]/40 text-[#fdd663]'
+                    : syncStatus === 'error'
+                    ? 'bg-[#f28b82]/15 border-[#f28b82]/40 text-[#f28b82]'
+                    : 'bg-[#303134] border-[#3c4043] text-[#9aa0a6]'
+                }`}
+              >
+                {syncStatus === 'synced'
+                  ? 'Đã đồng bộ Supabase'
+                  : syncStatus === 'syncing'
+                  ? 'Đang đồng bộ...'
+                  : syncStatus === 'error'
+                  ? 'Cần kiểm tra DB'
+                  : 'Sẵn sàng'}
+              </span>
+            </div>
+
+            <p className="text-[11px] text-[#9aa0a6] leading-relaxed">
+              Lưu toàn bộ <b>Notebooks, Code/Markdown Cells, Cấu hình Pipeline, DataProfile, CSV (≤15MB), Leaderboard &amp; Kho API Key AI</b> lên Supabase. Nhập cùng <b>Mã đồng bộ (Sync Key)</b> trên máy khác để lấy toàn bộ dữ liệu về ngay.
+            </p>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              <input
+                type="text"
+                value={syncKeyDraft}
+                onChange={(e) => setSyncKeyDraft(e.target.value)}
+                placeholder="VD: amlics-main-studio hoặc mã riêng của bạn"
+                className="flex-1 min-w-[180px] bg-[#202124] border border-[#3c4043] rounded px-2.5 py-1.5 text-xs font-mono text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8]"
+              />
+              <button
+                type="button"
+                onClick={() => onChangeSyncKey(syncKeyDraft)}
+                className="px-2.5 py-1.5 rounded bg-[#303134] hover:bg-[#3c4043] border border-[#3c4043] text-[#e8eaed] text-[11px] font-medium"
+              >
+                Áp dụng Mã
+              </button>
+              <button
+                type="button"
+                onClick={onPushAllToCloud}
+                disabled={syncStatus === 'syncing'}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-[#8ab4f8] hover:bg-[#aecbfa] text-[#18191a] text-[11px] font-semibold disabled:opacity-50"
+                title="Đẩy toàn bộ Notebooks & Cài đặt hiện tại lên Supabase"
+              >
+                <Upload className="w-3 h-3" />
+                <span>Đẩy lên</span>
+              </button>
+              <button
+                type="button"
+                onClick={onPullAllFromCloud}
+                disabled={syncStatus === 'syncing'}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded bg-[#292a2d] hover:bg-[#35363a] border border-[#3c4043] text-[#81c995] text-[11px] font-medium disabled:opacity-50"
+                title="Tải toàn bộ Notebooks & Cài đặt từ Supabase về máy này"
+              >
+                <Download className="w-3 h-3" />
+                <span>Tải về</span>
+              </button>
+            </div>
+
+            {syncMessage && (
+              <div className="text-[11px] font-mono text-[#bdc1c6] bg-[#202124] border border-[#3c4043] rounded px-2.5 py-1.5">
+                {syncMessage}
+              </div>
+            )}
+
+            {syncNeedsSchema && (
+              <div className="p-2.5 rounded bg-[#2d261b] border border-[#fdd663]/40 space-y-2 text-[11px]">
+                <div className="text-[#fdd663] font-medium">
+                  Supabase của bạn chưa có 2 bảng đồng bộ (<code>amlics_notebooks</code> &amp; <code>amlics_user_settings</code>).
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(SYNC_MIGRATION_SQL);
+                      setCopiedSql(true);
+                      setTimeout(() => setCopiedSql(false), 2000);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#fdd663] text-[#18191a] font-semibold"
+                  >
+                    <Copy className="w-3 h-3" />
+                    <span>{copiedSql ? 'Đã copy SQL!' : 'Copy SQL tạo bảng (Chạy trong Supabase SQL Editor)'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onPushAllToCloud}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[#303134] text-[#e8eaed]"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    <span>Thử lại</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Status Row */}
           <div className="p-3 rounded bg-[#18191a] border border-[#3c4043] flex flex-wrap items-center justify-between gap-2">
             <div className="space-y-0.5">
