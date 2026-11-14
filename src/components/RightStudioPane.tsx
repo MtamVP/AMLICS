@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { X } from 'lucide-react';
 import {
   ResponsiveContainer,
   BarChart,
@@ -87,6 +88,22 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
   const [colRoleFilter, setColRoleFilter] = useState<'all' | 'numeric' | 'categorical' | 'drop'>('all');
   const [rowSearch, setRowSearch] = useState<string>('');
   const [rowSort, setRowSort] = useState<{ col: string; dir: 'asc' | 'desc' } | null>(null);
+  const [zoomView, setZoomView] = useState<
+    | { kind: 'image'; src: string; title: string }
+    | { kind: 'importance' }
+    | { kind: 'comparison' }
+    | null
+  >(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && zoomView) {
+        setZoomView(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomView]);
 
   useEffect(() => {
     if (externalTab) {
@@ -264,8 +281,17 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
             ) : (
               <>
                 <div className="p-3 rounded bg-[#202124] border border-[#3c4043] space-y-2">
-                  <div className="text-[11px] font-medium text-[#e8eaed]">
-                    Holdout vs Cross-Validation Mean
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-[#e8eaed]">
+                      Holdout vs Cross-Validation Mean
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setZoomView({ kind: 'comparison' })}
+                      className="text-[10px] font-mono text-[#8ab4f8] hover:underline cursor-pointer"
+                    >
+                      Phóng to ⤢
+                    </button>
                   </div>
                   <div className="h-36 w-full">
                     <ResponsiveContainer width="100%" height="100%">
@@ -589,9 +615,18 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
 
                 {selectedExp.featureImportance && selectedExp.featureImportance.length > 0 && (
                   <div className="p-3 rounded bg-[#202124] border border-[#3c4043] space-y-2">
-                    <span className="text-[11px] font-medium text-[#e8eaed] block">
-                      Permutation Importance
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-[#e8eaed]">
+                        Permutation Importance
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setZoomView({ kind: 'importance' })}
+                        className="text-[10px] font-mono text-[#8ab4f8] hover:underline cursor-pointer"
+                      >
+                        Phóng to ⤢
+                      </button>
+                    </div>
                     <div className="h-44 w-full">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart
@@ -626,13 +661,24 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                     {selectedExp.figures.map((fig, idx) => (
                       <div
                         key={idx}
-                        className="rounded border border-[#3c4043] bg-[#202124] p-1"
+                        onClick={() =>
+                          setZoomView({
+                            kind: 'image',
+                            src: fig,
+                            title: `Run ${selectedExp.runNumber} — Plot #${idx + 1}`,
+                          })
+                        }
+                        title="Bấm để phóng to đồ thị"
+                        className="group relative rounded border border-[#3c4043] hover:border-[#8ab4f8] bg-[#202124] p-1 cursor-zoom-in transition-colors"
                       >
                         <img
                           src={fig}
                           alt={`Plot ${idx + 1}`}
                           className="w-full h-auto"
                         />
+                        <span className="opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-2 px-2 py-0.5 rounded bg-[#18191a]/90 border border-[#3c4043] text-[10px] font-mono text-[#8ab4f8]">
+                          Phóng to ⤢
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -1211,6 +1257,100 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
           </>
         )}
       </div>
+
+      {/* Plot / Chart Zoom Modal */}
+      {zoomView && (
+        <div
+          onClick={() => setZoomView(null)}
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-5xl max-h-[92vh] bg-[#202124] border border-[#3c4043] rounded-lg p-4 shadow-2xl flex flex-col gap-3"
+          >
+            <div className="flex items-center justify-between gap-4">
+              <span className="text-xs font-medium text-[#e8eaed]">
+                {zoomView.kind === 'image'
+                  ? zoomView.title
+                  : zoomView.kind === 'importance'
+                  ? `Permutation Importance — Run ${selectedExp?.runNumber ?? ''} (${selectedExp?.modelName ?? ''})`
+                  : 'Holdout vs Cross-Validation Mean'}
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomView(null)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#303134] hover:bg-[#3c4043] text-xs font-medium text-[#e8eaed] border border-[#3c4043] cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Thu nhỏ / Đóng</span>
+              </button>
+            </div>
+
+            {zoomView.kind === 'image' && (
+              <div className="overflow-auto flex items-center justify-center bg-[#18191a] rounded border border-[#292a2d] p-2">
+                <img
+                  src={zoomView.src}
+                  alt={zoomView.title}
+                  className="max-w-full max-h-[78vh] object-contain"
+                />
+              </div>
+            )}
+
+            {zoomView.kind === 'importance' && selectedExp?.featureImportance && (
+              <div className="h-[68vh] w-full bg-[#18191a] rounded border border-[#292a2d] p-3">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={selectedExp.featureImportance.slice(0, 20)}
+                    layout="vertical"
+                    margin={{ left: 20, right: 24, top: 10, bottom: 10 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" stroke="#292a2d" />
+                    <XAxis type="number" tick={{ fill: '#9aa0a6', fontSize: 11 }} />
+                    <YAxis
+                      type="category"
+                      dataKey="feature"
+                      width={160}
+                      tick={{ fill: '#e8eaed', fontSize: 11 }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#202124',
+                        borderColor: '#3c4043',
+                        fontSize: '12px',
+                      }}
+                    />
+                    <Bar dataKey="importance" fill="#8ab4f8" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            {zoomView.kind === 'comparison' && (
+              <div className="h-[65vh] w-full bg-[#18191a] rounded border border-[#292a2d] p-3">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={comparisonChartData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#292a2d" />
+                    <XAxis dataKey="name" tick={{ fill: '#9aa0a6', fontSize: 11 }} />
+                    <YAxis
+                      domain={taskType === 'classification' ? [0.4, 1.0] : ['auto', 'auto']}
+                      tick={{ fill: '#9aa0a6', fontSize: 11 }}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        backgroundColor: '#202124',
+                        borderColor: '#3c4043',
+                        fontSize: '12px',
+                      }}
+                    />
+                    <Bar dataKey="Holdout" fill="#8ab4f8" />
+                    <Bar dataKey="CV_Mean" fill="#81c995" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </aside>
   );
 };
