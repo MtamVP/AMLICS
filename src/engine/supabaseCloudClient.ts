@@ -32,9 +32,12 @@ export function regenerateSessionId(): string {
   return sid;
 }
 
+const DEFAULT_SUPABASE_URL = 'https://wymxwsxqbsbtlficvdaf.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_wffYh8Oma94f6qwRR59PSw_63GzH0oc';
+
 export function getStoredSupabaseCredentials(): SupabaseCredentials {
-  const envUrl = import.meta.env.VITE_SUPABASE_URL || '';
-  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+  const envUrl = import.meta.env.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const envKey = import.meta.env.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
   try {
     const raw = localStorage.getItem(STORAGE_CREDS_KEY);
     if (raw) {
