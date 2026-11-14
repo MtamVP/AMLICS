@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
 import {
   Play,
@@ -18,6 +18,7 @@ import {
   PipelineTemplateId,
   QuickSnippetId,
 } from '../types/studio';
+import { explainPythonError } from '../utils/errorExplainer';
 import { renderSafeMarkdownToHtml } from '../utils/markdownRenderer';
 
 interface CenterNotebookPaneProps {
@@ -39,6 +40,7 @@ interface CenterNotebookPaneProps {
   onDeleteCell: (cellId: string) => void;
   onApplyTemplate: (templateId: PipelineTemplateId) => void;
   onInsertQuickSnippet: (snippetId: QuickSnippetId) => void;
+  onDropCsvFile?: (file: File) => void;
 }
 
 export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
@@ -60,12 +62,24 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   onDeleteCell,
   onApplyTemplate,
   onInsertQuickSnippet,
+  onDropCsvFile,
 }) => {
   const [collapsedCells, setCollapsedCells] = useState<Record<string, boolean>>({});
   const [editingMarkdownIds, setEditingMarkdownIds] = useState<Record<string, boolean>>({});
   const [editingTitleCellId, setEditingTitleCellId] = useState<string | null>(null);
-  const [showTemplatesBar, setShowTemplatesBar] = useState<boolean>(true);
-  const [showSnippetsBar, setShowSnippetsBar] = useState<boolean>(false);
+  const [openDropdown, setOpenDropdown] = useState<'templates' | 'snippets' | null>(null);
+  const [isDraggingCsv, setIsDraggingCsv] = useState<boolean>(false);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpenDropdown(null);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
 
   const toggleCollapse = (id: string) => {
     setCollapsedCells((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -79,10 +93,35 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   };
 
   return (
-    <main className="w-full h-full bg-[#18191a] flex flex-col overflow-hidden">
-      {/* Colab-style "+ Code", "+ Text" & "+ Mẫu Code có sẵn" Subheader */}
-      <div className="px-4 py-1.5 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between select-none shrink-0 text-xs">
-        <div className="flex items-center gap-1.5 flex-wrap">
+    <main
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) {
+          e.preventDefault();
+          setIsDraggingCsv(true);
+        }
+      }}
+      onDragLeave={() => setIsDraggingCsv(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setIsDraggingCsv(false);
+        const file = e.dataTransfer.files?.[0];
+        if (file && file.name.toLowerCase().endsWith('.csv') && onDropCsvFile) {
+          onDropCsvFile(file);
+        }
+      }}
+      className="w-full h-full bg-[#18191a] flex flex-col overflow-hidden relative"
+    >
+      {isDraggingCsv && (
+        <div className="absolute inset-0 z-40 bg-[#18191a]/85 border-2 border-dashed border-[#8ab4f8] flex items-center justify-center pointer-events-none">
+          <div className="px-5 py-3 rounded bg-[#202124] border border-[#8ab4f8] text-sm font-mono text-[#8ab4f8]">
+            Thả file .csv vào đây để nạp dữ liệu ngay
+          </div>
+        </div>
+      )}
+
+      {/* Colab-style "+ Code", "+ Text" & Compact Dropdowns Subheader */}
+      <div className="px-4 py-1.5 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between select-none shrink-0 text-xs relative z-20">
+        <div ref={dropdownRef} className="flex items-center gap-1.5 flex-wrap">
           <button
             type="button"
             onClick={() => onInsertCellAt(cells.length, 'code')}
@@ -103,88 +142,103 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
 
           <span className="text-[#5f6368]">|</span>
 
-          <button
-            type="button"
-            onClick={() => {
-              setShowTemplatesBar((v) => !v);
-              setShowSnippetsBar(false);
-            }}
-            className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
-              showTemplatesBar
-                ? 'bg-[#292a2d] text-[#8ab4f8] border-[#8ab4f8]/50'
-                : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
-            }`}
-          >
-            Mẫu Pipeline {showTemplatesBar ? '▾' : '▸'}
-          </button>
+          {/* Compact Dropdown: Mẫu Pipeline */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() =>
+                setOpenDropdown((d) => (d === 'templates' ? null : 'templates'))
+              }
+              className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
+                openDropdown === 'templates'
+                  ? 'bg-[#292a2d] text-[#8ab4f8] border-[#8ab4f8]/60'
+                  : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
+              }`}
+            >
+              Mẫu Pipeline ▾
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              setShowSnippetsBar((v) => !v);
-              setShowTemplatesBar(false);
-            }}
-            className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
-              showSnippetsBar
-                ? 'bg-[#292a2d] text-[#81c995] border-[#81c995]/50'
-                : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
-            }`}
-            title="Chèn nhanh cell vẽ đồ thị hoặc bảng so sánh theo dữ liệu vừa tải"
-          >
-            + Đồ thị & So sánh {showSnippetsBar ? '▾' : '▸'}
-          </button>
+            {openDropdown === 'templates' && (
+              <div className="absolute left-0 top-full mt-1 w-80 rounded border border-[#3c4043] bg-[#292a2d] shadow-xl py-1 z-50">
+                <div className="px-3 py-1 text-[10px] font-mono text-[#9aa0a6] border-b border-[#3c4043]">
+                  Áp dụng cho: {activeDatasetName || 'dataset hiện tại'}
+                </div>
+                {PIPELINE_TEMPLATES.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdown(null);
+                      onApplyTemplate(tpl.id);
+                    }}
+                    className="w-full px-3 py-2 text-left hover:bg-[#3c4043] transition-colors space-y-0.5"
+                  >
+                    <div className="text-xs font-mono text-[#8ab4f8]">
+                      {tpl.shortLabel}
+                    </div>
+                    <div className="text-[10px] text-[#9aa0a6] leading-snug">
+                      {tpl.description}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Compact Dropdown: + Đồ thị & So sánh */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() =>
+                setOpenDropdown((d) => (d === 'snippets' ? null : 'snippets'))
+              }
+              className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
+                openDropdown === 'snippets'
+                  ? 'bg-[#292a2d] text-[#81c995] border-[#81c995]/60'
+                  : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
+              }`}
+              title="Chèn nhanh cell vẽ đồ thị hoặc bảng so sánh theo dữ liệu vừa tải"
+            >
+              + Đồ thị &amp; So sánh ▾
+            </button>
+
+            {openDropdown === 'snippets' && (
+              <div className="absolute left-0 top-full mt-1 w-80 rounded border border-[#3c4043] bg-[#292a2d] shadow-xl py-1 z-50">
+                <div className="px-3 py-1 text-[10px] font-mono text-[#81c995] border-b border-[#3c4043]">
+                  Chèn cell cho: {activeDatasetName || 'df'}
+                </div>
+                {QUICK_SNIPPETS.map((snip) => (
+                  <button
+                    key={snip.id}
+                    type="button"
+                    onClick={() => {
+                      setOpenDropdown(null);
+                      onInsertQuickSnippet(snip.id);
+                    }}
+                    className="w-full px-3 py-2 text-left hover:bg-[#3c4043] transition-colors space-y-0.5"
+                  >
+                    <div className="text-xs font-mono text-[#e8eaed]">
+                      + {snip.label}
+                    </div>
+                    <div className="text-[10px] text-[#9aa0a6] leading-snug">
+                      {snip.description}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <span className="text-[#5f6368] hidden sm:inline">|</span>
           <span className="text-[11px] text-[#9aa0a6] hidden sm:inline">
-            {cells.length} cells ({cells.filter((c) => c.cellType === 'code' && !c.isLocked).length}{' '}
-            UI-synced, {cells.filter((c) => c.cellType === 'code' && c.isLocked).length} locked)
+            {cells.length} cells
           </span>
         </div>
 
         <span className="hidden lg:inline text-[10px] font-mono text-[#9aa0a6]">
-          Click tên cell để đổi tên • Shift+Enter (Chạy cell)
+          Kéo thả .csv vào đây • Click tên cell để đổi tên
         </span>
       </div>
-
-      {/* Quick-Start Ready-to-Use Templates Bar (Bấm vào tự nhảy code theo đúng ý) */}
-      {showTemplatesBar && (
-        <div className="px-4 py-2 bg-[#202124]/80 border-b border-[#3c4043] flex items-center gap-1.5 overflow-x-auto shrink-0">
-          <span className="text-[10px] font-mono text-[#9aa0a6] shrink-0 mr-1">
-            Mẫu cho {activeDatasetName ? activeDatasetName : 'dataset'}:
-          </span>
-          {PIPELINE_TEMPLATES.map((tpl) => (
-            <button
-              key={tpl.id}
-              type="button"
-              onClick={() => onApplyTemplate(tpl.id)}
-              title={tpl.description}
-              className="px-2.5 py-1 rounded bg-[#292a2d] hover:bg-[#3c4043] border border-[#3c4043] hover:border-[#8ab4f8] text-[11px] text-[#e8eaed] hover:text-[#8ab4f8] font-mono shrink-0 transition-colors"
-            >
-              {tpl.shortLabel}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Quick Plots & Comparison Snippets Bar */}
-      {showSnippetsBar && (
-        <div className="px-4 py-2 bg-[#202124]/80 border-b border-[#3c4043] flex items-center gap-1.5 overflow-x-auto shrink-0">
-          <span className="text-[10px] font-mono text-[#81c995] shrink-0 mr-1">
-            Chèn cell cho {activeDatasetName ? activeDatasetName : 'df'}:
-          </span>
-          {QUICK_SNIPPETS.map((snip) => (
-            <button
-              key={snip.id}
-              type="button"
-              onClick={() => onInsertQuickSnippet(snip.id)}
-              title={snip.description}
-              className="px-2.5 py-1 rounded bg-[#292a2d] hover:bg-[#3c4043] border border-[#3c4043] hover:border-[#81c995] text-[11px] text-[#e8eaed] hover:text-[#81c995] font-mono shrink-0 transition-colors"
-            >
-              + {snip.label}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* Notebook Cells Container */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 custom-scrollbar">
@@ -578,15 +632,23 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                   (cell.figures && cell.figures.length > 0)) && (
                   <div className="border-t border-[#3c4043] bg-[#18191a] px-3.5 py-2.5 space-y-2">
                     {cell.outputText && (
-                      <pre
-                        className={`text-xs font-mono whitespace-pre-wrap break-words max-h-56 overflow-y-auto pl-2.5 border-l-2 ${
-                          cell.status === 'error'
-                            ? 'border-[#f28b82] text-[#f28b82]'
-                            : 'border-[#5f6368] text-[#e8eaed]'
-                        }`}
-                      >
-                        {cell.outputText}
-                      </pre>
+                      <>
+                        <pre
+                          className={`text-xs font-mono whitespace-pre-wrap break-words max-h-56 overflow-y-auto pl-2.5 border-l-2 ${
+                            cell.status === 'error'
+                              ? 'border-[#f28b82] text-[#f28b82]'
+                              : 'border-[#5f6368] text-[#e8eaed]'
+                          }`}
+                        >
+                          {cell.outputText}
+                        </pre>
+                        {cell.status === 'error' &&
+                          explainPythonError(cell.outputText) && (
+                            <div className="px-2.5 py-1.5 rounded bg-[#2d261b] border border-[#fdd663]/40 text-[11px] text-[#fdd663]">
+                              {explainPythonError(cell.outputText)}
+                            </div>
+                          )}
+                      </>
                     )}
 
                     {cell.htmlOutput && (

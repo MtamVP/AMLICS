@@ -61,6 +61,8 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   onSwitchToCloud,
 }) => {
   const [openSection, setOpenSection] = useState<number>(1);
+  const [showAdvPrep, setShowAdvPrep] = useState<boolean>(false);
+  const [showAdvHp, setShowAdvHp] = useState<boolean>(false);
 
   const toggleSection = (sec: number) => {
     setOpenSection((prev) => (prev === sec ? 0 : sec));
@@ -769,62 +771,76 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                   </div>
                 </div>
 
-                {config.categoricalEncoder === 'onehot' && (
-                  <div className="flex items-center justify-between text-[11px] pt-0.5">
-                    <span className="text-[#9aa0a6]">max_categories (OneHot)</span>
-                    <select
-                      value={config.maxOneHotCategories}
-                      onChange={(e) =>
-                        onChangeConfig((p) => ({
-                          ...p,
-                          maxOneHotCategories: Number(e.target.value),
-                        }))
-                      }
-                      className="bg-[#202124] border border-[#3c4043] rounded px-1.5 py-0.5 text-[11px] text-[#e8eaed] font-mono"
-                    >
-                      <option value={10}>10</option>
-                      <option value={20}>20</option>
-                      <option value={50}>50</option>
-                      <option value={100}>100</option>
-                    </select>
+                <div className="pt-1 border-t border-[#292a2d]">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvPrep((v) => !v)}
+                    className="text-[11px] font-mono text-[#8ab4f8] hover:underline flex items-center gap-1"
+                  >
+                    <span>{showAdvPrep ? '▾' : '▸'} Advanced Feature Eng. & Selection</span>
+                  </button>
+                </div>
+
+                {showAdvPrep && (
+                  <div className="space-y-2 pt-1">
+                    {config.categoricalEncoder === 'onehot' && (
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-[#9aa0a6]">max_categories (OneHot)</span>
+                        <select
+                          value={config.maxOneHotCategories}
+                          onChange={(e) =>
+                            onChangeConfig((p) => ({
+                              ...p,
+                              maxOneHotCategories: Number(e.target.value),
+                            }))
+                          }
+                          className="bg-[#202124] border border-[#3c4043] rounded px-1.5 py-0.5 text-[11px] text-[#e8eaed] font-mono"
+                        >
+                          <option value={10}>10</option>
+                          <option value={20}>20</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
+                        </select>
+                      </div>
+                    )}
+
+                    <div>
+                      <span className="text-[10px] text-[#9aa0a6] block mb-1">
+                        Feature Selection (Inside Pipeline)
+                      </span>
+                      <select
+                        value={config.featureSelection}
+                        onChange={(e) =>
+                          onChangeConfig((p) => ({
+                            ...p,
+                            featureSelection: e.target.value as FeatureSelectionStrategy,
+                          }))
+                        }
+                        className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
+                      >
+                        <option value="none">None (Keep all encoded features)</option>
+                        <option value="select_k_best_10">SelectKBest (Top 10 ANOVA/F-test)</option>
+                        <option value="select_k_best_20">SelectKBest (Top 20 ANOVA/F-test)</option>
+                        <option value="select_from_model">SelectFromModel (RandomForest importance)</option>
+                      </select>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-[#9aa0a6] hover:text-[#e8eaed] cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config.varianceThreshold}
+                        onChange={() =>
+                          onChangeConfig((p) => ({
+                            ...p,
+                            varianceThreshold: !p.varianceThreshold,
+                          }))
+                        }
+                        className="accent-[#8ab4f8]"
+                      />
+                      <span>VarianceThreshold (drop 0-variance)</span>
+                    </label>
                   </div>
                 )}
-              </div>
-
-              <div className="space-y-2 pt-2 border-t border-[#292a2d]">
-                <span className="text-[11px] font-medium text-[#9aa0a6] block">
-                  Feature Selection (Inside Pipeline)
-                </span>
-                <select
-                  value={config.featureSelection}
-                  onChange={(e) =>
-                    onChangeConfig((p) => ({
-                      ...p,
-                      featureSelection: e.target.value as FeatureSelectionStrategy,
-                    }))
-                  }
-                  className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-xs text-[#e8eaed]"
-                >
-                  <option value="none">None (Keep all encoded features)</option>
-                  <option value="select_k_best_10">SelectKBest (Top 10 ANOVA/F-test)</option>
-                  <option value="select_k_best_20">SelectKBest (Top 20 ANOVA/F-test)</option>
-                  <option value="select_from_model">SelectFromModel (RandomForest importance)</option>
-                </select>
-
-                <label className="flex items-center gap-2 text-xs text-[#9aa0a6] hover:text-[#e8eaed] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.varianceThreshold}
-                    onChange={() =>
-                      onChangeConfig((p) => ({
-                        ...p,
-                        varianceThreshold: !p.varianceThreshold,
-                      }))
-                    }
-                    className="accent-[#8ab4f8]"
-                  />
-                  <span>VarianceThreshold (drop 0-variance)</span>
-                </label>
               </div>
             </div>
           )}
@@ -1189,34 +1205,6 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
 
                   <div>
                     <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                      <span className="text-[#9aa0a6]">min_samples_leaf</span>
-                      <span className="text-[#e8eaed]">
-                        {config.hyperparameters.minSamplesLeaf}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={1}
-                      max={50}
-                      step={1}
-                      value={config.hyperparameters.minSamplesLeaf}
-                      onChange={(e) =>
-                        onChangeConfig((p) => ({
-                          ...p,
-                          hyperparameters: {
-                            ...p.hyperparameters,
-                            minSamplesLeaf: Number(e.target.value),
-                          },
-                        }))
-                      }
-                      className="w-full accent-[#8ab4f8] h-1 bg-[#3c4043] rounded cursor-pointer"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <div className="flex justify-between text-[11px] font-mono mb-0.5">
                       <span className="text-[#9aa0a6]">l2_reg / alpha</span>
                       <span className="text-[#e8eaed]">
                         {config.hyperparameters.l2Regularization}
@@ -1240,51 +1228,93 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                       className="w-full accent-[#8ab4f8] h-1 bg-[#3c4043] rounded cursor-pointer"
                     />
                   </div>
-
-                  <div>
-                    <div className="flex justify-between text-[11px] font-mono mb-0.5">
-                      <span className="text-[#9aa0a6]">subsample</span>
-                      <span className="text-[#e8eaed]">
-                        {config.hyperparameters.subsample}
-                      </span>
-                    </div>
-                    <input
-                      type="range"
-                      min={0.5}
-                      max={1.0}
-                      step={0.05}
-                      value={config.hyperparameters.subsample}
-                      onChange={(e) =>
-                        onChangeConfig((p) => ({
-                          ...p,
-                          hyperparameters: {
-                            ...p.hyperparameters,
-                            subsample: Number(e.target.value),
-                          },
-                        }))
-                      }
-                      className="w-full accent-[#8ab4f8] h-1 bg-[#3c4043] rounded cursor-pointer"
-                    />
-                  </div>
                 </div>
 
-                <label className="flex items-center gap-2 text-xs text-[#9aa0a6] hover:text-[#e8eaed] pt-0.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.hyperparameters.earlyStopping}
-                    onChange={() =>
-                      onChangeConfig((p) => ({
-                        ...p,
-                        hyperparameters: {
-                          ...p.hyperparameters,
-                          earlyStopping: !p.hyperparameters.earlyStopping,
-                        },
-                      }))
-                    }
-                    className="accent-[#8ab4f8]"
-                  />
-                  <span>early_stopping=True (Stop on val plateau)</span>
-                </label>
+                <div className="pt-1 border-t border-[#292a2d]">
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvHp((v) => !v)}
+                    className="text-[11px] font-mono text-[#8ab4f8] hover:underline flex items-center gap-1"
+                  >
+                    <span>{showAdvHp ? '▾' : '▸'} Advanced Hyperparameters</span>
+                  </button>
+                </div>
+
+                {showAdvHp && (
+                  <div className="space-y-2.5 pt-1">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <div className="flex justify-between text-[11px] font-mono mb-0.5">
+                          <span className="text-[#9aa0a6]">min_samples_leaf</span>
+                          <span className="text-[#e8eaed]">
+                            {config.hyperparameters.minSamplesLeaf}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={1}
+                          max={50}
+                          step={1}
+                          value={config.hyperparameters.minSamplesLeaf}
+                          onChange={(e) =>
+                            onChangeConfig((p) => ({
+                              ...p,
+                              hyperparameters: {
+                                ...p.hyperparameters,
+                                minSamplesLeaf: Number(e.target.value),
+                              },
+                            }))
+                          }
+                          className="w-full accent-[#8ab4f8] h-1 bg-[#3c4043] rounded cursor-pointer"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex justify-between text-[11px] font-mono mb-0.5">
+                          <span className="text-[#9aa0a6]">subsample</span>
+                          <span className="text-[#e8eaed]">
+                            {config.hyperparameters.subsample}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={0.5}
+                          max={1.0}
+                          step={0.05}
+                          value={config.hyperparameters.subsample}
+                          onChange={(e) =>
+                            onChangeConfig((p) => ({
+                              ...p,
+                              hyperparameters: {
+                                ...p.hyperparameters,
+                                subsample: Number(e.target.value),
+                              },
+                            }))
+                          }
+                          className="w-full accent-[#8ab4f8] h-1 bg-[#3c4043] rounded cursor-pointer"
+                        />
+                      </div>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-[#9aa0a6] hover:text-[#e8eaed] pt-0.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config.hyperparameters.earlyStopping}
+                        onChange={() =>
+                          onChangeConfig((p) => ({
+                            ...p,
+                            hyperparameters: {
+                              ...p.hyperparameters,
+                              earlyStopping: !p.hyperparameters.earlyStopping,
+                            },
+                          }))
+                        }
+                        className="accent-[#8ab4f8]"
+                      />
+                      <span>early_stopping=True (Stop on val plateau)</span>
+                    </label>
+                  </div>
+                )}
               </div>
             </div>
           )}

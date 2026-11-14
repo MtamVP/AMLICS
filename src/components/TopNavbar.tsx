@@ -1,5 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Play, RotateCcw, Square, Trash2 } from 'lucide-react';
+import {
+  ChevronDown,
+  PanelLeft,
+  PanelRight,
+  Play,
+  RotateCcw,
+  Square,
+  Trash2,
+} from 'lucide-react';
 import { HardwareInfo, RuntimeMode, WorkerStatus } from '../types/studio';
 
 interface TopNavbarProps {
@@ -15,6 +23,10 @@ interface TopNavbarProps {
   isExecuting: boolean;
   hasSubmissionCsv: boolean;
   hasActiveCell: boolean;
+  showLeftPanel: boolean;
+  showRightPanel: boolean;
+  onToggleLeftPanel: () => void;
+  onToggleRightPanel: () => void;
   onRunAllCells: () => void;
   onRunActiveCell: () => void;
   onRunBeforeActiveCell: () => void;
@@ -43,6 +55,10 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   isExecuting,
   hasSubmissionCsv,
   hasActiveCell,
+  showLeftPanel,
+  showRightPanel,
+  onToggleLeftPanel,
+  onToggleRightPanel,
   onRunAllCells,
   onRunActiveCell,
   onRunBeforeActiveCell,
@@ -245,8 +261,35 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         </div>
       </div>
 
-      {/* Right: Runtime Selector & Resource Pill */}
+      {/* Right: Panel Toggles, Runtime Selector & Resource Pill */}
       <div className="flex items-center gap-2">
+        <div className="flex items-center bg-[#18191a] p-0.5 rounded border border-[#3c4043]">
+          <button
+            type="button"
+            onClick={onToggleLeftPanel}
+            title={showLeftPanel ? 'Ẩn cột Pipeline Configuration' : 'Mở cột Pipeline Configuration'}
+            className={`p-1 rounded-sm transition-colors ${
+              showLeftPanel
+                ? 'bg-[#303134] text-[#8ab4f8]'
+                : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+            }`}
+          >
+            <PanelLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onToggleRightPanel}
+            title={showRightPanel ? 'Ẩn cột Leaderboard & Console' : 'Mở cột Leaderboard & Console'}
+            className={`p-1 rounded-sm transition-colors ${
+              showRightPanel
+                ? 'bg-[#303134] text-[#8ab4f8]'
+                : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+            }`}
+          >
+            <PanelRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
         <div className="flex items-center bg-[#18191a] p-0.5 rounded border border-[#3c4043] text-xs">
           <button
             type="button"

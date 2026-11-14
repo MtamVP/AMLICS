@@ -46,7 +46,7 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'diagnostics' | 'data'>('leaderboard');
   const [quickCmd, setQuickCmd] = useState<string>('');
-  const [cliExpanded, setCliExpanded] = useState<boolean>(true);
+  const [cliExpanded, setCliExpanded] = useState<boolean>(false);
   const [filterCurrentDataset, setFilterCurrentDataset] = useState<boolean>(false);
 
   const currentDsName = dataProfile?.dataset_name || '';

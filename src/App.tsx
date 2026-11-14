@@ -83,6 +83,8 @@ export function App() {
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [isPipelineRunning, setIsPipelineRunning] = useState<boolean>(false);
   const [hasSubmissionCsv, setHasSubmissionCsv] = useState<boolean>(false);
+  const [showLeftPanel, setShowLeftPanel] = useState<boolean>(true);
+  const [showRightPanel, setShowRightPanel] = useState<boolean>(true);
 
   const [urlLoading, setUrlLoading] = useState<boolean>(false);
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -1112,12 +1114,7 @@ ${metricLines}`;
     }
   };
 
-  // Upload Train CSV
-  const handleTrainCsvChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-
+  const processTrainCsvFile = async (file: File) => {
     const textContent = await file.text();
     const safeFilename = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
 
@@ -1146,6 +1143,14 @@ ${metricLines}`;
       subsampleRows:
         runtimeMode === 'pyodide' && file.size > 15 * 1024 * 1024 ? 10000 : 0,
     }));
+  };
+
+  // Upload Train CSV
+  const handleTrainCsvChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    await processTrainCsvFile(file);
   };
 
   // Upload Test CSV (for submission.csv)
@@ -1282,6 +1287,10 @@ ${metricLines}`;
         isExecuting={runningCellId !== null || isPipelineRunning}
         hasSubmissionCsv={hasSubmissionCsv}
         hasActiveCell={cells.length > 0}
+        showLeftPanel={showLeftPanel}
+        showRightPanel={showRightPanel}
+        onToggleLeftPanel={() => setShowLeftPanel((v) => !v)}
+        onToggleRightPanel={() => setShowRightPanel((v) => !v)}
         onRunAllCells={handleRunAllCells}
         onRunActiveCell={handleRunActiveCell}
         onRunBeforeActiveCell={handleRunBeforeActiveCell}
@@ -1299,24 +1308,26 @@ ${metricLines}`;
       />
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="w-[300px] xl:w-[330px] shrink-0 h-full overflow-hidden">
-          <LeftPipelineSidebar
-            config={config}
-            runtimeMode={runtimeMode}
-            dataProfile={dataProfile}
-            availableCloudFiles={cloudHardware?.available_files || []}
-            urlLoading={urlLoading}
-            urlError={urlError}
-            onChangeConfig={setConfig}
-            onUploadCsvClick={() => trainCsvInputRef.current?.click()}
-            onUploadTestCsvClick={() => testCsvInputRef.current?.click()}
-            onFetchPublicUrl={handleFetchPublicUrl}
-            onSwitchToCloud={() => {
-              setRuntimeMode('cloud');
-              setIsCloudModalOpen(true);
-            }}
-          />
-        </div>
+        {showLeftPanel && (
+          <div className="w-[300px] xl:w-[320px] shrink-0 h-full overflow-hidden">
+            <LeftPipelineSidebar
+              config={config}
+              runtimeMode={runtimeMode}
+              dataProfile={dataProfile}
+              availableCloudFiles={cloudHardware?.available_files || []}
+              urlLoading={urlLoading}
+              urlError={urlError}
+              onChangeConfig={setConfig}
+              onUploadCsvClick={() => trainCsvInputRef.current?.click()}
+              onUploadTestCsvClick={() => testCsvInputRef.current?.click()}
+              onFetchPublicUrl={handleFetchPublicUrl}
+              onSwitchToCloud={() => {
+                setRuntimeMode('cloud');
+                setIsCloudModalOpen(true);
+              }}
+            />
+          </div>
+        )}
 
         <div className="flex-1 min-w-0 h-full overflow-hidden">
           <CenterNotebookPane
@@ -1338,25 +1349,28 @@ ${metricLines}`;
             onDeleteCell={handleDeleteCell}
             onApplyTemplate={handleApplyTemplate}
             onInsertQuickSnippet={handleInsertQuickSnippet}
+            onDropCsvFile={processTrainCsvFile}
           />
         </div>
 
-        <div className="w-[360px] xl:w-[410px] shrink-0 h-full overflow-hidden">
-          <RightStudioPane
-            taskType={config.taskType}
-            dataProfile={dataProfile}
-            experiments={experiments}
-            selectedExpId={selectedExpId}
-            onSelectExperiment={setSelectedExpId}
-            onRestoreExperiment={handleRestoreExperiment}
-            onInsertMarkdownSummary={handleInsertMarkdownSummary}
-            onClearExperiments={() => setExperiments([])}
-            cliLogs={cliLogs}
-            onClearLogs={() => setCliLogs([])}
-            namespaceVars={namespaceVars}
-            onRunQuickCommand={handleRunQuickCommand}
-          />
-        </div>
+        {showRightPanel && (
+          <div className="w-[350px] xl:w-[390px] shrink-0 h-full overflow-hidden">
+            <RightStudioPane
+              taskType={config.taskType}
+              dataProfile={dataProfile}
+              experiments={experiments}
+              selectedExpId={selectedExpId}
+              onSelectExperiment={setSelectedExpId}
+              onRestoreExperiment={handleRestoreExperiment}
+              onInsertMarkdownSummary={handleInsertMarkdownSummary}
+              onClearExperiments={() => setExperiments([])}
+              cliLogs={cliLogs}
+              onClearLogs={() => setCliLogs([])}
+              namespaceVars={namespaceVars}
+              onRunQuickCommand={handleRunQuickCommand}
+            />
+          </div>
+        )}
       </div>
 
       {/* Bottom Status Bar */}
