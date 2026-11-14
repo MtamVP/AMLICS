@@ -816,18 +816,27 @@ export function generateCell5Evaluate(config: PipelineConfig): string {
   const idCol = (config.idColumnForSubmission || 'id').replace(/'/g, "\\'");
 
   const submissionExportBlock = `
-# Export predictions to submission.csv (uses df_test if loaded, otherwise holdout X_test)
-sub_source_df = df_test if 'df_test' in globals() and isinstance(df_test, pd.DataFrame) else clean_df.loc[X_test.index]
-sub_X = sub_source_df[[c for c in (numeric_features + categorical_features) if c in sub_source_df.columns]]
+# Export predictions to submission.csv (uses df_test if loaded and schema matches, otherwise holdout X_test)
+_req_cols = list(X_train.columns)
+_use_df_test = (
+    'df_test' in globals()
+    and isinstance(df_test, pd.DataFrame)
+    and len(_req_cols) > 0
+    and set(_req_cols).issubset(set(df_test.columns))
+)
+if 'df_test' in globals() and isinstance(df_test, pd.DataFrame) and not _use_df_test:
+    print("Note: Loaded df_test columns do not match trained features; using holdout X_test for submission.csv.")
+sub_source_df = df_test if _use_df_test else clean_df.loc[X_test.index]
+sub_X = sub_source_df[_req_cols] if len(_req_cols) > 0 else X_test.copy()
 ${
   isClass
-    ? `sub_preds = full_pipeline.predict_proba(sub_X)[:, 1] if hasattr(full_pipeline, "predict_proba") else full_pipeline.predict(sub_X)`
+    ? `sub_preds = full_pipeline.predict_proba(sub_X)[:, 1] if hasattr(full_pipeline, "predict_proba") and len(np.unique(y_train)) == 2 else full_pipeline.predict(sub_X)`
     : `sub_preds = full_pipeline.predict(sub_X)`
 }
 id_col_name = '${idCol}' if '${idCol}' in sub_source_df.columns else sub_source_df.columns[0]
 submission_df = pd.DataFrame({
     id_col_name: sub_source_df[id_col_name].values if id_col_name in sub_source_df.columns else np.arange(len(sub_X)),
-    TARGET_COL: np.round(sub_preds, 6)
+    TARGET_COL: np.round(sub_preds, 6) if np.issubdtype(np.asarray(sub_preds).dtype, np.number) else sub_preds
 })
 submission_df.to_csv('/tmp/submission.csv', index=False) if os.path.exists('/tmp') else None
 submission_df.to_csv('submission.csv', index=False)
