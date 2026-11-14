@@ -755,6 +755,7 @@ else:
 
   return `# [4] Pipeline Training & Cross-Validation
 from sklearn.base import clone
+from sklearn.pipeline import Pipeline
 from sklearn.metrics import roc_auc_score, f1_score, root_mean_squared_error, r2_score
 
 ${modelInitBlock}
@@ -1308,12 +1309,13 @@ candidates = {
     }
 }
 
+from sklearn.pipeline import Pipeline as _BenchPipeline
 scoring_metric = '${isClass ? 'roc_auc' : 'neg_root_mean_squared_error'}'
 bench_rows = []
 
 for m_name, m_est in candidates.items():
     t0 = time.perf_counter()
-    pipe = Pipeline([('preprocessor', clone(preprocessor)), ('model', m_est)])
+    pipe = _BenchPipeline([('preprocessor', clone(preprocessor)), ('model', m_est)])
     scores = cross_val_score(pipe, X_train, y_train, cv=min(${config.cvFolds}, 3), scoring=scoring_metric)
     if not ${isClass ? 'True' : 'False'}:
         scores = -scores  # Convert neg_rmse to positive RMSE
