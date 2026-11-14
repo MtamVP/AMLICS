@@ -10,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   Pencil,
+  X,
 } from 'lucide-react';
 import { PIPELINE_TEMPLATES, QUICK_SNIPPETS } from '../data/sampleDatasets';
 import {
@@ -84,6 +85,18 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
   const toggleCollapse = (id: string) => {
     setCollapsedCells((prev) => ({ ...prev, [id]: !prev[id] }));
   };
+
+  const [zoomedPlotSrc, setZoomedPlotSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && zoomedPlotSrc) {
+        setZoomedPlotSrc(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomedPlotSrc]);
 
   const toggleMarkdownEdit = (id: string, forceState?: boolean) => {
     setEditingMarkdownIds((prev) => ({
@@ -663,13 +676,18 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                         {cell.figures.map((figSrc, fIdx) => (
                           <div
                             key={fIdx}
-                            className="rounded border border-[#3c4043] bg-[#202124] p-1"
+                            onClick={() => setZoomedPlotSrc(figSrc)}
+                            title="Bấm để phóng to đồ thị"
+                            className="group relative rounded border border-[#3c4043] hover:border-[#8ab4f8] bg-[#202124] p-1 cursor-zoom-in transition-colors"
                           >
                             <img
                               src={figSrc}
                               alt={`Output plot ${fIdx + 1}`}
                               className="w-full h-auto object-contain max-h-72 mx-auto"
                             />
+                            <span className="opacity-0 group-hover:opacity-100 transition-opacity absolute top-2 right-2 px-2 py-0.5 rounded bg-[#18191a]/90 border border-[#3c4043] text-[10px] font-mono text-[#8ab4f8]">
+                              Phóng to ⤢
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -686,6 +704,40 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
           );
         })}
       </div>
+
+      {/* Plot Lightbox / Zoom Modal */}
+      {zoomedPlotSrc && (
+        <div
+          onClick={() => setZoomedPlotSrc(null)}
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 sm:p-8"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative max-w-[95vw] max-h-[92vh] bg-[#202124] border border-[#3c4043] rounded-lg p-3 shadow-2xl flex flex-col gap-2"
+          >
+            <div className="flex items-center justify-between gap-4 px-1">
+              <span className="text-xs font-mono text-[#9aa0a6]">
+                Xem đồ thị phóng to (bấm Esc hoặc nền tối để thu nhỏ)
+              </span>
+              <button
+                type="button"
+                onClick={() => setZoomedPlotSrc(null)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#303134] hover:bg-[#3c4043] text-xs font-medium text-[#e8eaed] border border-[#3c4043] cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Thu nhỏ / Đóng</span>
+              </button>
+            </div>
+            <div className="overflow-auto flex items-center justify-center bg-[#18191a] rounded border border-[#292a2d] p-2">
+              <img
+                src={zoomedPlotSrc}
+                alt="Zoomed output plot"
+                className="max-w-full max-h-[80vh] object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 };

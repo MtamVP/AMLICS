@@ -291,30 +291,70 @@ cv_splitter = KFold(n_splits=${config.cvFolds}, shuffle=True, random_state=${con
 
   return `# [3] Train / Holdout Split & Cross-Validation Setup
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 ${cvInitCode}
 
 clean_df = df.dropna(subset=[TARGET_COL]).copy()
-X = clean_df[numeric_features + categorical_features].copy()
+
+# Sanitize real-world numeric & categorical features before splitting
+_active_num = [c for c in numeric_features if c in clean_df.columns]
+_active_cat = [c for c in categorical_features if c in clean_df.columns]
+X = clean_df[_active_num + _active_cat].copy()
+X = X.replace([np.inf, -np.inf], np.nan)
+for _nc in _active_num:
+    X[_nc] = pd.to_numeric(X[_nc].astype(str).str.replace(',', '', regex=False), errors='coerce') if X[_nc].dtype == object else pd.to_numeric(X[_nc], errors='coerce')
+for _cc in _active_cat:
+    X[_cc] = X[_cc].where(X[_cc].notna(), np.nan).apply(lambda _v: str(_v) if pd.notna(_v) else np.nan)
+
+# Guard against 100% NaN columns so SimpleImputer/ColumnTransformer never mismatches shapes
+_all_nan_cols = [c for c in X.columns if X[c].isna().all()]
+if _all_nan_cols:
+    print(f"Filling 100% NaN columns with safe defaults: {_all_nan_cols}")
+    for _anc in _all_nan_cols:
+        X[_anc] = 0.0 if _anc in _active_num else 'Missing'
+
 y = clean_df[TARGET_COL].copy()
 
 ${
   isClass
-    ? `if not pd.api.types.is_numeric_dtype(y):
-    y = pd.Series(pd.factorize(y)[0], index=clean_df.index)
-else:
-    y = y.astype(int)`
-    : `y = y.astype(float)`
+    ? `# Encode arbitrary class labels (strings, non-0-indexed ints, negatives) to 0..K-1
+target_label_encoder = LabelEncoder()
+y = pd.Series(target_label_encoder.fit_transform(y.astype(str)), index=clean_df.index)
+_cls_counts = y.value_counts()
+_rare_classes = _cls_counts[_cls_counts < 2].index.tolist()
+if _rare_classes:
+    print(f"Dropping {len(_rare_classes)} rare class(es) with < 2 samples so stratified split/CV stays valid.")
+    _keep_mask = ~y.isin(_rare_classes)
+    X = X.loc[_keep_mask]
+    y = pd.Series(target_label_encoder.fit_transform(clean_df.loc[_keep_mask, TARGET_COL].astype(str)), index=X.index)`
+    : `y = pd.to_numeric(y.astype(str).str.replace(',', '', regex=False), errors='coerce')
+_valid_y = y.notna()
+if not _valid_y.all():
+    X = X.loc[_valid_y]
+    y = y.loc[_valid_y]
+y = y.astype(float)`
 }
+
+_strat_arg = ${stratifyExpr}
+if _strat_arg is not None and pd.Series(_strat_arg).value_counts().min() < 2:
+    _strat_arg = None
 
 X_train, X_test, y_train, y_test = train_test_split(
     X, y,
     test_size=${config.testSize},
     shuffle=${shuffleSplit},
     random_state=${config.hyperparameters.randomState},
-    stratify=${stratifyExpr}
+    stratify=_strat_arg
 )
 
-print(f"Split: Train={X_train.shape[0]:,} | Holdout Test={X_test.shape[0]:,} | CV=${config.cvStrategy}(n_splits=${config.cvFolds})")
+# Clamp CV n_splits to avoid crashing on small or imbalanced real-world datasets
+if hasattr(cv_splitter, 'n_splits'):
+    _max_splits = int(pd.Series(y_train).value_counts().min()) if ${isStratified ? 'True' : 'False'} else len(X_train)
+    if _max_splits >= 2 and cv_splitter.n_splits > _max_splits:
+        print(f"Clamping CV n_splits from {cv_splitter.n_splits} -> {_max_splits} to fit smallest class/sample count.")
+        cv_splitter.n_splits = _max_splits
+
+print(f"Split: Train={X_train.shape[0]:,} | Holdout Test={X_test.shape[0]:,} | CV=${config.cvStrategy}(n_splits={getattr(cv_splitter, 'n_splits', ${config.cvFolds})})")
 ${
   isClass
     ? `print("Train class distribution:", pd.Series(y_train).value_counts().to_dict())`

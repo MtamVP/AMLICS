@@ -327,8 +327,24 @@ self.onmessage = async (event: MessageEvent) => {
 
       if (isTestFile) {
         await pyodide.runPythonAsync(`
+def _smart_read_csv(path):
+    for enc in ('utf-8', 'utf-8-sig', 'latin1'):
+        try:
+            d = pd.read_csv(path, encoding=enc)
+            if d.shape[1] == 1:
+                d_auto = pd.read_csv(path, sep=None, engine='python', encoding=enc)
+                if d_auto.shape[1] > 1:
+                    return d_auto
+            return d
+        except Exception:
+            try:
+                return pd.read_csv(path, sep=None, engine='python', encoding=enc)
+            except Exception:
+                continue
+    return pd.read_csv(path)
+
 TEST_DATASET_NAME = '${filename.replace(/'/g, "\\'")}'
-df_test = pd.read_csv('/tmp/' + TEST_DATASET_NAME)
+df_test = _smart_read_csv('/tmp/' + TEST_DATASET_NAME)
         `);
         self.postMessage({
           type: 'test_csv_uploaded',
@@ -337,8 +353,24 @@ df_test = pd.read_csv('/tmp/' + TEST_DATASET_NAME)
         });
       } else {
         const profileJson = (await pyodide.runPythonAsync(`
+def _smart_read_csv(path):
+    for enc in ('utf-8', 'utf-8-sig', 'latin1'):
+        try:
+            d = pd.read_csv(path, encoding=enc)
+            if d.shape[1] == 1:
+                d_auto = pd.read_csv(path, sep=None, engine='python', encoding=enc)
+                if d_auto.shape[1] > 1:
+                    return d_auto
+            return d
+        except Exception:
+            try:
+                return pd.read_csv(path, sep=None, engine='python', encoding=enc)
+            except Exception:
+                continue
+    return pd.read_csv(path)
+
 DATASET_NAME = '${filename.replace(/'/g, "\\'")}'
-df = pd.read_csv('/tmp/' + DATASET_NAME)
+df = _smart_read_csv('/tmp/' + DATASET_NAME)
 json.dumps(_extract_data_profile_dict(df, DATASET_NAME))
         `)) as string;
 
