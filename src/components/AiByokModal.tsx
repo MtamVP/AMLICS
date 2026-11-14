@@ -111,10 +111,10 @@ export const AiByokModal: React.FC<AiByokModalProps> = ({
         <div className="px-4 py-3 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold">
-              AI Copilot (BYOK — Bring Your Own Key)
+              AMLICS Plugin AI (Multi-Key BYOK)
             </h2>
             <p className="text-[11px] text-[#9aa0a6]">
-              Dùng API Key cá nhân (Gemini / OpenAI) lưu trên trình duyệt • Chỉ gửi tên cột &amp; thống kê schema, không gửi dữ liệu thô.
+              Cắm API Key từ nhiều AI khác nhau (Gemini / OpenAI) lưu trên trình duyệt • Chỉ gửi tên cột &amp; thống kê schema, không gửi dữ liệu thô.
             </p>
           </div>
           <button

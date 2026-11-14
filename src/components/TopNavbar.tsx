@@ -356,11 +356,11 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         <button
           type="button"
           onClick={onOpenAiModal}
-          title="AI Copilot (BYOK - dùng Gemini hoặc OpenAI Key của bạn để Auto-Optimize & sinh code)"
+          title="AMLICS Plugin AI — Cắm API Key từ nhiều AI (Gemini, OpenAI...) để Auto-Optimize & sinh code"
           className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium bg-[#303134] hover:bg-[#3c4043] text-[#8ab4f8] border border-[#8ab4f8]/40 transition-colors cursor-pointer"
         >
           <Sparkles className="w-3.5 h-3.5" />
-          <span>AI Copilot (BYOK)</span>
+          <span>Plugin AI (BYOK)</span>
         </button>
 
         <div className="flex items-center bg-[#18191a] p-0.5 rounded border border-[#3c4043]">
