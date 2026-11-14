@@ -379,39 +379,41 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
       )}
 
       {/* Colab-style "+ Code", "+ Text" & Compact Dropdowns Subheader */}
-      <div className="px-4 py-1.5 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between select-none shrink-0 text-xs relative z-20">
-        <div ref={dropdownRef} className="flex items-center gap-1.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => onInsertCellAt(cells.length, 'code')}
-            className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-[#303134] text-[#e8eaed] font-medium transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Code</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onInsertCellAt(cells.length, 'markdown')}
-            className="flex items-center gap-1 px-2 py-0.5 rounded hover:bg-[#303134] text-[#e8eaed] font-medium transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>Text</span>
-          </button>
-
-          <span className="text-[#5f6368]">|</span>
+      <div className="px-3 py-1.5 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between gap-2 select-none shrink-0 text-xs relative z-20">
+        <div ref={dropdownRef} className="flex items-center gap-1.5 flex-wrap min-w-0">
+          <div className="inline-flex items-center rounded-md border border-[#3c4043] bg-[#18191a]/60 overflow-hidden h-7 shrink-0">
+            <button
+              type="button"
+              onClick={() => onInsertCellAt(cells.length, 'code')}
+              className="flex items-center gap-1 px-2.5 h-full hover:bg-[#303134] text-[#e8eaed] font-medium transition-colors whitespace-nowrap"
+              title="Thêm Code Cell mới"
+            >
+              <Plus className="w-3.5 h-3.5 text-[#8ab4f8]" />
+              <span>Code</span>
+            </button>
+            <div className="w-px h-4 bg-[#3c4043]" />
+            <button
+              type="button"
+              onClick={() => onInsertCellAt(cells.length, 'markdown')}
+              className="flex items-center gap-1 px-2.5 h-full hover:bg-[#303134] text-[#e8eaed] font-medium transition-colors whitespace-nowrap"
+              title="Thêm Text (Markdown) Cell mới"
+            >
+              <Plus className="w-3.5 h-3.5 text-[#81c995]" />
+              <span>Text</span>
+            </button>
+          </div>
 
           {/* Compact Dropdown: Mẫu Pipeline */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               type="button"
               onClick={() =>
                 setOpenDropdown((d) => (d === 'templates' ? null : 'templates'))
               }
-              className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
+              className={`h-7 px-2.5 rounded-md font-mono text-[11px] border transition-colors whitespace-nowrap flex items-center ${
                 openDropdown === 'templates'
                   ? 'bg-[#292a2d] text-[#8ab4f8] border-[#8ab4f8]/60'
-                  : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
+                  : 'bg-[#18191a]/40 text-[#bdc1c6] border-[#3c4043] hover:text-[#e8eaed] hover:bg-[#292a2d]'
               }`}
             >
               Mẫu Pipeline ▾
@@ -445,20 +447,20 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
           </div>
 
           {/* Compact Dropdown: + Đồ thị & So sánh */}
-          <div className="relative">
+          <div className="relative shrink-0">
             <button
               type="button"
               onClick={() =>
                 setOpenDropdown((d) => (d === 'snippets' ? null : 'snippets'))
               }
-              className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
+              className={`h-7 px-2.5 rounded-md font-mono text-[11px] border transition-colors whitespace-nowrap flex items-center ${
                 openDropdown === 'snippets'
                   ? 'bg-[#292a2d] text-[#81c995] border-[#81c995]/60'
-                  : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
+                  : 'bg-[#18191a]/40 text-[#bdc1c6] border-[#3c4043] hover:text-[#e8eaed] hover:bg-[#292a2d]'
               }`}
               title="Chèn nhanh cell vẽ đồ thị hoặc bảng so sánh theo dữ liệu vừa tải"
             >
-              + Đồ thị &amp; So sánh ▾
+              + Đồ thị ▾
             </button>
 
             {openDropdown === 'snippets' && (
@@ -488,33 +490,35 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
             )}
           </div>
 
-          <span className="text-[#5f6368] hidden sm:inline">|</span>
-          <span className="text-[11px] text-[#9aa0a6] hidden sm:inline">
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <span className="hidden md:inline-flex items-center h-7 px-2 rounded-md bg-[#18191a]/60 border border-[#3c4043]/70 text-[11px] font-mono text-[#9aa0a6] whitespace-nowrap">
             {cells.length} cells
           </span>
           {cells.length > 0 && (
             <button
               type="button"
               onClick={toggleCollapseAll}
-              className="px-2 py-0.5 rounded font-mono text-[11px] border border-[#3c4043] text-[#9aa0a6] hover:text-[#e8eaed] hover:bg-[#292a2d] transition-colors"
+              className="h-7 px-2.5 rounded-md font-mono text-[11px] border border-[#3c4043] bg-[#18191a]/40 text-[#bdc1c6] hover:text-[#e8eaed] hover:bg-[#292a2d] transition-colors whitespace-nowrap"
               title="Thu gọn hoặc mở rộng tất cả các cell để dễ tìm và xóa nhanh"
             >
-              {allCollapsed ? 'Mở tất cả' : 'Thu gọn tất cả'}
+              {allCollapsed ? 'Mở rộng' : 'Thu gọn'}
             </button>
           )}
           {selectedCellIds.length > 1 ? (
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#8ab4f8]/15 border border-[#8ab4f8]/50 text-[11px] font-mono">
+            <div className="flex items-center gap-1.5 h-7 px-2 rounded-md bg-[#8ab4f8]/15 border border-[#8ab4f8]/50 text-[11px] font-mono whitespace-nowrap">
               <span className="text-[#8ab4f8] font-semibold">
-                Đã chọn {selectedCellIds.length} cells
+                {selectedCellIds.length} đã chọn
               </span>
               <button
                 type="button"
                 onClick={deleteSelected}
-                className="flex items-center gap-1 px-1.5 py-0.2 rounded bg-[#f28b82]/20 hover:bg-[#f28b82]/30 text-[#f28b82]"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#f28b82]/20 hover:bg-[#f28b82]/30 text-[#f28b82]"
                 title="Xóa tất cả các cell đã chọn (Delete / Backspace)"
               >
                 <Trash2 className="w-3 h-3" />
-                <span>Xóa {selectedCellIds.length}</span>
+                <span>Xóa</span>
               </button>
               <button
                 type="button"
@@ -530,42 +534,37 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
               <button
                 type="button"
                 onClick={deleteSelected}
-                className="flex items-center gap-1 px-2 py-0.5 rounded font-mono text-[11px] border border-[#f28b82]/40 text-[#f28b82] hover:bg-[#f28b82]/15 transition-colors"
+                className="flex items-center gap-1 h-7 px-2.5 rounded-md font-mono text-[11px] border border-[#f28b82]/40 bg-[#f28b82]/5 text-[#f28b82] hover:bg-[#f28b82]/15 transition-colors whitespace-nowrap"
                 title="Xóa cell đang chọn (Delete / Alt+Backspace)"
               >
                 <Trash2 className="w-3 h-3" />
-                <span className="hidden md:inline">Xóa cell</span>
+                <span className="hidden sm:inline">Xóa</span>
               </button>
             )
           )}
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={() => setIsShortcutsOpen(true)}
-            className="px-2 py-0.5 rounded font-mono text-[11px] border border-[#3c4043] text-[#9aa0a6] hover:text-[#e8eaed] hover:bg-[#292a2d] transition-colors"
+            className="h-7 px-2.5 rounded-md font-mono text-[11px] border border-[#3c4043] bg-[#18191a]/40 text-[#bdc1c6] hover:text-[#e8eaed] hover:bg-[#292a2d] transition-colors whitespace-nowrap flex items-center gap-1"
             title="Xem danh sách phím tắt (? hoặc Alt+/)"
           >
-            ⌨ Phím tắt
+            <span>⌨</span>
+            <span className="hidden xl:inline">Phím tắt</span>
           </button>
           {cells.length > 0 && (
             <button
               type="button"
               onClick={() => setShowMinimap((m) => !m)}
-              className={`px-2 py-0.5 rounded font-mono text-[11px] border transition-colors ${
+              className={`h-7 px-2.5 rounded-md font-mono text-[11px] border transition-colors whitespace-nowrap flex items-center ${
                 showMinimap
-                  ? 'bg-[#292a2d] text-[#8ab4f8] border-[#8ab4f8]/50'
-                  : 'bg-transparent text-[#9aa0a6] border-[#3c4043] hover:text-[#e8eaed]'
+                  ? 'bg-[#8ab4f8]/15 text-[#8ab4f8] border-[#8ab4f8]/50'
+                  : 'bg-[#18191a]/40 text-[#bdc1c6] border-[#3c4043] hover:text-[#e8eaed] hover:bg-[#292a2d]'
               }`}
               title="Bật/tắt thanh Minimap thu nhỏ bên phải (giống VS Code)"
             >
               Map{cells.some((c) => c.status === 'error') ? ' • !' : ''}
             </button>
           )}
-          <span className="hidden lg:inline text-[10px] font-mono text-[#9aa0a6]">
-            Kéo thả .csv vào đây • Click tên cell để đổi tên
-          </span>
         </div>
       </div>
 
