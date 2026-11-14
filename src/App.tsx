@@ -80,6 +80,16 @@ function triggerBrowserDownload(filename: string, textContent: string) {
   URL.revokeObjectURL(url);
 }
 
+type ViewportMode = 'mobile' | 'compact' | 'desktop';
+type MobileTab = 'config' | 'notebook' | 'results';
+
+function detectViewportMode(): ViewportMode {
+  if (typeof window === 'undefined') return 'desktop';
+  if (window.innerWidth < 768) return 'mobile';
+  if (window.innerWidth < 1280) return 'compact';
+  return 'desktop';
+}
+
 export function App() {
   const [projectName, setProjectName] = useState<string>('AMLICS_Pipeline_Notebook');
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('pyodide');
@@ -104,8 +114,58 @@ export function App() {
   const [isTournamentRunning, setIsTournamentRunning] = useState<boolean>(false);
   const configProvenanceRef = useRef<ConfigProvenance>('manual');
   const [hasSubmissionCsv, setHasSubmissionCsv] = useState<boolean>(false);
-  const [showLeftPanel, setShowLeftPanel] = useState<boolean>(true);
-  const [showRightPanel, setShowRightPanel] = useState<boolean>(true);
+  const [viewportMode, setViewportMode] = useState<ViewportMode>(() => detectViewportMode());
+  const [mobileTab, setMobileTab] = useState<MobileTab>('notebook');
+  const [showLeftPanel, setShowLeftPanel] = useState<boolean>(() => detectViewportMode() === 'desktop');
+  const [showRightPanel, setShowRightPanel] = useState<boolean>(() => detectViewportMode() === 'desktop');
+
+  useEffect(() => {
+    let prevMode = detectViewportMode();
+    const handleResize = () => {
+      const next = detectViewportMode();
+      setViewportMode(next);
+      if (next !== prevMode) {
+        if (next === 'desktop') {
+          setShowLeftPanel(true);
+          setShowRightPanel(true);
+        } else {
+          setShowLeftPanel(false);
+          setShowRightPanel(false);
+        }
+        prevMode = next;
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleToggleLeftPanel = useCallback(() => {
+    if (viewportMode === 'mobile') {
+      setMobileTab((t) => (t === 'config' ? 'notebook' : 'config'));
+      return;
+    }
+    setShowLeftPanel((prev) => {
+      const next = !prev;
+      if (next && viewportMode === 'compact') {
+        setShowRightPanel(false);
+      }
+      return next;
+    });
+  }, [viewportMode]);
+
+  const handleToggleRightPanel = useCallback(() => {
+    if (viewportMode === 'mobile') {
+      setMobileTab((t) => (t === 'results' ? 'notebook' : 'results'));
+      return;
+    }
+    setShowRightPanel((prev) => {
+      const next = !prev;
+      if (next && viewportMode === 'compact') {
+        setShowLeftPanel(false);
+      }
+      return next;
+    });
+  }, [viewportMode]);
 
   const [urlLoading, setUrlLoading] = useState<boolean>(false);
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -2189,10 +2249,10 @@ ${metricLines}`;
         isExecuting={runningCellId !== null || isPipelineRunning}
         hasSubmissionCsv={hasSubmissionCsv}
         hasActiveCell={cells.length > 0}
-        showLeftPanel={showLeftPanel}
-        showRightPanel={showRightPanel}
-        onToggleLeftPanel={() => setShowLeftPanel((v) => !v)}
-        onToggleRightPanel={() => setShowRightPanel((v) => !v)}
+        showLeftPanel={viewportMode === 'mobile' ? mobileTab === 'config' : showLeftPanel}
+        showRightPanel={viewportMode === 'mobile' ? mobileTab === 'results' : showRightPanel}
+        onToggleLeftPanel={handleToggleLeftPanel}
+        onToggleRightPanel={handleToggleRightPanel}
         onRunAllCells={handleRunAllCells}
         onRunActiveCell={handleRunActiveCell}
         onRunBeforeActiveCell={handleRunBeforeActiveCell}
@@ -2222,9 +2282,30 @@ ${metricLines}`;
         onOpenCommandPalette={() => setIsCmdPaletteOpen(true)}
       />
 
-      <div className="flex-1 flex overflow-hidden">
-        {showLeftPanel && (
-          <div className="w-[300px] xl:w-[320px] shrink-0 h-full overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
+        {/* Compact (half-screen / tablet) backdrop when an overlay drawer is open */}
+        {viewportMode === 'compact' && (showLeftPanel || showRightPanel) && (
+          <div
+            onClick={() => {
+              setShowLeftPanel(false);
+              setShowRightPanel(false);
+            }}
+            className="absolute inset-0 z-30 bg-black/50 backdrop-blur-[1px]"
+          />
+        )}
+
+        {/* Left Pipeline Configuration: full-width on mobile tab, slide-over drawer on compact, docked on desktop */}
+        {((viewportMode === 'mobile' && mobileTab === 'config') ||
+          (viewportMode !== 'mobile' && showLeftPanel)) && (
+          <div
+            className={
+              viewportMode === 'mobile'
+                ? 'w-full h-full overflow-hidden'
+                : viewportMode === 'compact'
+                ? 'absolute inset-y-0 left-0 z-40 w-[320px] max-w-[85vw] h-full overflow-hidden shadow-2xl border-r border-[#3c4043] bg-[#202124]'
+                : 'w-[300px] xl:w-[320px] shrink-0 h-full overflow-hidden'
+            }
+          >
             <LeftPipelineSidebar
               config={config}
               runtimeMode={runtimeMode}
@@ -2245,33 +2326,46 @@ ${metricLines}`;
           </div>
         )}
 
-        <div className="flex-1 min-w-0 h-full overflow-hidden">
-          <CenterNotebookPane
-            cells={cells}
-            runningCellId={runningCellId}
-            activeCellId={activeCellId}
-            activeDatasetName={dataProfile?.dataset_name || config.uploadedFileName}
-            onSelectCell={setActiveCellId}
-            onRunCell={executeSingleCell}
-            onRunFromCell={handleRunFromCell}
-            onStopCell={handleStopExecution}
-            onEditCellCode={handleEditCellCode}
-            onRenameCell={handleRenameCell}
-            onToggleLockCell={handleToggleLockCell}
-            onResetCellToTemplate={handleResetCellToTemplate}
-            onInsertCellAt={handleInsertCellAt}
-            onMoveCell={handleMoveCell}
-            onDuplicateCell={handleDuplicateCell}
-            onDeleteCell={handleDeleteCell}
-            onDeleteCells={handleDeleteCells}
-            onApplyTemplate={handleApplyTemplate}
-            onInsertQuickSnippet={handleInsertQuickSnippet}
-            onDropCsvFile={processTrainCsvFile}
-          />
-        </div>
+        {/* Center Notebook Pane: full-width on mobile tab, always 100% flex-1 on compact & desktop */}
+        {(viewportMode !== 'mobile' || mobileTab === 'notebook') && (
+          <div className="flex-1 min-w-0 h-full overflow-hidden">
+            <CenterNotebookPane
+              cells={cells}
+              runningCellId={runningCellId}
+              activeCellId={activeCellId}
+              activeDatasetName={dataProfile?.dataset_name || config.uploadedFileName}
+              onSelectCell={setActiveCellId}
+              onRunCell={executeSingleCell}
+              onRunFromCell={handleRunFromCell}
+              onStopCell={handleStopExecution}
+              onEditCellCode={handleEditCellCode}
+              onRenameCell={handleRenameCell}
+              onToggleLockCell={handleToggleLockCell}
+              onResetCellToTemplate={handleResetCellToTemplate}
+              onInsertCellAt={handleInsertCellAt}
+              onMoveCell={handleMoveCell}
+              onDuplicateCell={handleDuplicateCell}
+              onDeleteCell={handleDeleteCell}
+              onDeleteCells={handleDeleteCells}
+              onApplyTemplate={handleApplyTemplate}
+              onInsertQuickSnippet={handleInsertQuickSnippet}
+              onDropCsvFile={processTrainCsvFile}
+            />
+          </div>
+        )}
 
-        {showRightPanel && (
-          <div className="w-[350px] xl:w-[390px] shrink-0 h-full overflow-hidden">
+        {/* Right Studio Pane: full-width on mobile tab, slide-over drawer on compact, docked on desktop */}
+        {((viewportMode === 'mobile' && mobileTab === 'results') ||
+          (viewportMode !== 'mobile' && showRightPanel)) && (
+          <div
+            className={
+              viewportMode === 'mobile'
+                ? 'w-full h-full overflow-hidden'
+                : viewportMode === 'compact'
+                ? 'absolute inset-y-0 right-0 z-40 w-[370px] max-w-[90vw] h-full overflow-hidden shadow-2xl border-l border-[#3c4043] bg-[#202124]'
+                : 'w-[350px] xl:w-[390px] shrink-0 h-full overflow-hidden'
+            }
+          >
             <RightStudioPane
               taskType={config.taskType}
               config={config}
@@ -2306,8 +2400,54 @@ ${metricLines}`;
         )}
       </div>
 
-      {/* Bottom Status Bar */}
-      <footer className="h-6 px-3 bg-[#202124] border-t border-[#3c4043] flex items-center justify-between text-[11px] text-[#9aa0a6] select-none shrink-0 font-mono">
+      {/* Mobile Bottom Tab Switcher (< 768px) */}
+      <nav className="md:hidden h-12 bg-[#202124] border-t border-[#3c4043] grid grid-cols-3 shrink-0 select-none z-30">
+        <button
+          type="button"
+          onClick={() => setMobileTab('config')}
+          className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+            mobileTab === 'config'
+              ? 'text-[#8ab4f8] bg-[#292a2d]/60 border-t-2 border-[#8ab4f8]'
+              : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+          }`}
+        >
+          <span>Cấu hình</span>
+          <span className="text-[9px] font-mono opacity-80 truncate max-w-[90px]">
+            {dataProfile ? dataProfile.dataset_name : 'Dataset & Model'}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab('notebook')}
+          className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+            mobileTab === 'notebook'
+              ? 'text-[#8ab4f8] bg-[#292a2d]/60 border-t-2 border-[#8ab4f8]'
+              : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+          }`}
+        >
+          <span>Notebook</span>
+          <span className="text-[9px] font-mono opacity-80">
+            {cells.length} cells
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMobileTab('results')}
+          className={`flex flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors ${
+            mobileTab === 'results'
+              ? 'text-[#8ab4f8] bg-[#292a2d]/60 border-t-2 border-[#8ab4f8]'
+              : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+          }`}
+        >
+          <span>Kết quả ({experiments.length})</span>
+          <span className="text-[9px] font-mono opacity-80">
+            Leaderboard &amp; Plots
+          </span>
+        </button>
+      </nav>
+
+      {/* Bottom Status Bar (tablet/desktop) */}
+      <footer className="hidden md:flex h-6 px-3 bg-[#202124] border-t border-[#3c4043] items-center justify-between text-[11px] text-[#9aa0a6] select-none shrink-0 font-mono">
         <div className="flex items-center gap-3">
           <span>
             {runtimeMode === 'pyodide'
