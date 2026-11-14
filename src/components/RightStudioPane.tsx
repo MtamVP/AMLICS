@@ -40,6 +40,14 @@ interface RightStudioPaneProps {
   onWhatIfPredict: (row: Record<string, string | number>) => void;
   whatIfLoading: boolean;
   whatIfResult: WhatIfResult | null;
+  onBatchPredictCsv: (file: File) => void;
+  batchPredictLoading: boolean;
+  batchPredictMessage: string | null;
+  onDropHighMissing: () => void;
+  onDropLeakageCols: () => void;
+  onInsertDatetimeCell: () => void;
+  onInstallPackage: (pkg: string) => void;
+  externalTab?: 'leaderboard' | 'diagnostics' | 'data' | 'predict' | null;
 }
 
 export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
@@ -59,12 +67,32 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
   onWhatIfPredict,
   whatIfLoading,
   whatIfResult,
+  onBatchPredictCsv,
+  batchPredictLoading,
+  batchPredictMessage,
+  onDropHighMissing,
+  onDropLeakageCols,
+  onInsertDatetimeCell,
+  onInstallPackage,
+  externalTab,
 }) => {
   const [activeTab, setActiveTab] = useState<'leaderboard' | 'diagnostics' | 'data' | 'predict'>('leaderboard');
   const [quickCmd, setQuickCmd] = useState<string>('');
+  const [pipPkg, setPipPkg] = useState<string>('');
   const [cliExpanded, setCliExpanded] = useState<boolean>(false);
   const [filterCurrentDataset, setFilterCurrentDataset] = useState<boolean>(false);
   const [whatIfValues, setWhatIfValues] = useState<Record<string, string | number>>({});
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [colSearch, setColSearch] = useState<string>('');
+  const [colRoleFilter, setColRoleFilter] = useState<'all' | 'numeric' | 'categorical' | 'drop'>('all');
+  const [rowSearch, setRowSearch] = useState<string>('');
+  const [rowSort, setRowSort] = useState<{ col: string; dir: 'asc' | 'desc' } | null>(null);
+
+  useEffect(() => {
+    if (externalTab) {
+      setActiveTab(externalTab);
+    }
+  }, [externalTab]);
 
   useEffect(() => {
     if (!dataProfile) return;
@@ -262,6 +290,102 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                   </div>
                 </div>
 
+                {/* Experiment Diff (when 2 runs selected) */}
+                {compareIds.length === 2 &&
+                  (() => {
+                    const expA = visibleExperiments.find((e) => e.id === compareIds[0]);
+                    const expB = visibleExperiments.find((e) => e.id === compareIds[1]);
+                    if (!expA || !expB) return null;
+                    const primaryA =
+                      expA.taskType === 'classification'
+                        ? expA.metrics.roc_auc ?? expA.metrics.f1 ?? 0
+                        : expA.metrics.r2 ?? 0;
+                    const primaryB =
+                      expB.taskType === 'classification'
+                        ? expB.metrics.roc_auc ?? expB.metrics.f1 ?? 0
+                        : expB.metrics.r2 ?? 0;
+                    const delta = primaryB - primaryA;
+                    const cvDelta = (expB.metrics.cv_mean ?? 0) - (expA.metrics.cv_mean ?? 0);
+                    const diffs: { label: string; a: string; b: string }[] = [
+                      { label: 'Model', a: expA.modelFamily, b: expB.modelFamily },
+                      {
+                        label: 'Scaler',
+                        a: expA.preprocessingSummary.numericScaler,
+                        b: expB.preprocessingSummary.numericScaler,
+                      },
+                      {
+                        label: 'Encoder',
+                        a: expA.preprocessingSummary.categoricalEncoder,
+                        b: expB.preprocessingSummary.categoricalEncoder,
+                      },
+                      {
+                        label: 'CV',
+                        a: `${expA.preprocessingSummary.cvStrategy} (${expA.preprocessingSummary.cvFolds})`,
+                        b: `${expB.preprocessingSummary.cvStrategy} (${expB.preprocessingSummary.cvFolds})`,
+                      },
+                      {
+                        label: 'LR / Depth',
+                        a: `${expA.hyperparameters.learningRate} / ${expA.hyperparameters.maxDepth}`,
+                        b: `${expB.hyperparameters.learningRate} / ${expB.hyperparameters.maxDepth}`,
+                      },
+                      {
+                        label: 'Features',
+                        a: String(expA.preprocessingSummary.featureCount),
+                        b: String(expB.preprocessingSummary.featureCount),
+                      },
+                    ].filter((d) => d.a !== d.b);
+
+                    return (
+                      <div className="p-2.5 rounded bg-[#202124] border border-[#8ab4f8]/50 space-y-1.5 text-[11px]">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-[#8ab4f8]">
+                            So sánh Run #{expA.runNumber} vs Run #{expB.runNumber}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setCompareIds([])}
+                            className="text-[10px] text-[#9aa0a6] hover:text-[#e8eaed]"
+                          >
+                            Đóng
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-3 font-mono text-[10px]">
+                          <span>
+                            Holdout:{' '}
+                            <strong className={delta >= 0 ? 'text-[#81c995]' : 'text-[#f28b82]'}>
+                              {delta >= 0 ? '+' : ''}
+                              {delta.toFixed(4)}
+                            </strong>
+                          </span>
+                          <span>
+                            CV Mean:{' '}
+                            <strong className={cvDelta >= 0 ? 'text-[#81c995]' : 'text-[#f28b82]'}>
+                              {cvDelta >= 0 ? '+' : ''}
+                              {cvDelta.toFixed(4)}
+                            </strong>
+                          </span>
+                        </div>
+                        {diffs.length === 0 ? (
+                          <div className="text-[10px] text-[#9aa0a6]">
+                            Hai lần chạy dùng cùng cấu hình.
+                          </div>
+                        ) : (
+                          <div className="space-y-0.5 pt-1 border-t border-[#292a2d] font-mono text-[10px]">
+                            {diffs.map((d) => (
+                              <div key={d.label} className="flex justify-between gap-2">
+                                <span className="text-[#9aa0a6]">{d.label}:</span>
+                                <span className="text-[#e8eaed] truncate">
+                                  <span className="text-[#f28b82]">{d.a}</span> →{' '}
+                                  <span className="text-[#81c995]">{d.b}</span>
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                 {/* Experiment Cards */}
                 <div className="space-y-2">
                   {sortedExperiments.map((exp, rankIdx) => {
@@ -380,6 +504,26 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                             lr={exp.hyperparameters.learningRate} depth={exp.hyperparameters.maxDepth}
                           </span>
                           <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setCompareIds((prev) => {
+                                  if (prev.includes(exp.id)) {
+                                    return prev.filter((id) => id !== exp.id);
+                                  }
+                                  return prev.length >= 2 ? [prev[1], exp.id] : [...prev, exp.id];
+                                });
+                              }}
+                              className={`px-1.5 py-0.2 rounded border text-[10px] ${
+                                compareIds.includes(exp.id)
+                                  ? 'bg-[#8ab4f8]/20 border-[#8ab4f8] text-[#8ab4f8]'
+                                  : 'border-[#3c4043] hover:text-[#e8eaed]'
+                              }`}
+                              title="Chọn 2 lần chạy để so sánh trực tiếp"
+                            >
+                              {compareIds.includes(exp.id) ? '✓ Compare' : 'Compare'}
+                            </button>
                             <button
                               type="button"
                               onClick={(e) => {
@@ -529,6 +673,36 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
               </div>
             </div>
 
+            {/* 1-Click Data Surgery & Leakage Guard */}
+            <div className="p-2.5 rounded border border-[#3c4043] bg-[#202124] space-y-1.5">
+              <div className="text-[11px] font-medium text-[#e8eaed]">
+                1-Click Data Surgery
+              </div>
+              <div className="flex flex-wrap gap-1.5 font-mono text-[10px]">
+                <button
+                  type="button"
+                  onClick={onDropHighMissing}
+                  className="px-2 py-1 rounded bg-[#292a2d] hover:bg-[#35363a] text-[#fdd663] border border-[#3c4043] cursor-pointer"
+                >
+                  Drop &gt;50% NaN
+                </button>
+                <button
+                  type="button"
+                  onClick={onDropLeakageCols}
+                  className="px-2 py-1 rounded bg-[#292a2d] hover:bg-[#35363a] text-[#f28b82] border border-[#3c4043] cursor-pointer"
+                >
+                  Drop nghi Leakage
+                </button>
+                <button
+                  type="button"
+                  onClick={onInsertDatetimeCell}
+                  className="px-2 py-1 rounded bg-[#292a2d] hover:bg-[#35363a] text-[#81c995] border border-[#3c4043] cursor-pointer"
+                >
+                  + Tách cột Datetime
+                </button>
+              </div>
+            </div>
+
             {/* Automated Leakage & Data Quality Warnings */}
             {warnings.length > 0 && (
               <div className="rounded border border-[#3c4043] bg-[#202124] overflow-hidden">
@@ -557,62 +731,174 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
               </div>
             )}
 
+            {/* Interactive Column Explorer */}
             <div className="rounded border border-[#3c4043] bg-[#202124] overflow-hidden">
               <div className="px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] text-[11px] font-medium text-[#e8eaed] flex items-center justify-between">
-                <span>Column Schema</span>
+                <span>Data Explorer ({dataProfile.columns.length} cols)</span>
                 <span className="font-mono text-[10px] text-[#9aa0a6]">
                   {dataProfile.dataset_name}
                 </span>
               </div>
-              <div className="max-h-52 overflow-y-auto divide-y divide-[#292a2d]">
-                {dataProfile.columns.map((col) => (
-                  <div
-                    key={col.name}
-                    className="px-3 py-1.5 flex items-center justify-between gap-2 text-[11px] font-mono"
-                  >
-                    <div className="min-w-0">
-                      <div className="text-[#e8eaed] truncate flex items-center gap-1.5">
-                        <span>{col.name}</span>
-                        {col.is_id_like && (
-                          <span className="text-[9px] px-1 rounded-sm bg-[#3c4043] text-[#fdd663]">
-                            ID (Auto-dropped)
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[10px] text-[#9aa0a6]">
-                        {col.dtype} • {col.nunique} unique
-                        {col.mean !== undefined ? ` • mean=${col.mean}` : ''}
-                      </div>
-                    </div>
-                    <span
-                      className={`text-[10px] shrink-0 ${
-                        col.missing_pct > 0 ? 'text-[#fdd663]' : 'text-[#9aa0a6]'
+
+              <div className="p-2 border-b border-[#292a2d] space-y-1.5 bg-[#18191a]">
+                <input
+                  type="text"
+                  value={colSearch}
+                  onChange={(e) => setColSearch(e.target.value)}
+                  placeholder="Tìm kiếm tên cột..."
+                  className="w-full bg-[#202124] border border-[#3c4043] rounded px-2 py-1 text-[11px] text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8]"
+                />
+                <div className="flex items-center gap-1 text-[10px] font-mono">
+                  {(['all', 'numeric', 'categorical', 'drop'] as const).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setColRoleFilter(r)}
+                      className={`px-1.5 py-0.5 rounded border ${
+                        colRoleFilter === r
+                          ? 'bg-[#303134] border-[#8ab4f8] text-[#8ab4f8]'
+                          : 'border-[#3c4043] text-[#9aa0a6] hover:text-[#e8eaed]'
                       }`}
                     >
-                      {col.missing_pct}% NaN
-                    </span>
-                  </div>
-                ))}
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="max-h-64 overflow-y-auto divide-y divide-[#292a2d]">
+                {dataProfile.columns
+                  .filter((col) => {
+                    if (colSearch && !col.name.toLowerCase().includes(colSearch.toLowerCase())) {
+                      return false;
+                    }
+                    if (colRoleFilter === 'numeric') return config.numericColumns.includes(col.name);
+                    if (colRoleFilter === 'categorical') return config.categoricalColumns.includes(col.name);
+                    if (colRoleFilter === 'drop') return config.dropColumns.includes(col.name);
+                    return true;
+                  })
+                  .map((col) => {
+                    const topEntries = col.top_values ? Object.entries(col.top_values).slice(0, 3) : [];
+                    const maxTop = topEntries.reduce((m, [, v]) => Math.max(m, v), 1);
+                    return (
+                      <div
+                        key={col.name}
+                        className="px-3 py-2 space-y-1 text-[11px] font-mono"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-[#e8eaed] truncate flex items-center gap-1.5">
+                            <span>{col.name}</span>
+                            {col.name === config.targetColumn && (
+                              <span className="text-[9px] px-1 rounded-sm bg-[#8ab4f8]/20 text-[#8ab4f8]">
+                                TARGET
+                              </span>
+                            )}
+                            {col.is_id_like && (
+                              <span className="text-[9px] px-1 rounded-sm bg-[#3c4043] text-[#fdd663]">
+                                ID
+                              </span>
+                            )}
+                          </div>
+                          <span
+                            className={`text-[10px] shrink-0 ${
+                              col.missing_pct > 0 ? 'text-[#fdd663]' : 'text-[#9aa0a6]'
+                            }`}
+                          >
+                            {col.missing_pct}% NaN
+                          </span>
+                        </div>
+
+                        <div className="text-[10px] text-[#9aa0a6]">
+                          {col.dtype} • {col.nunique} unique
+                          {col.min !== undefined && col.max !== undefined
+                            ? ` • [${col.min.toFixed(1)}..${col.max.toFixed(1)}]`
+                            : ''}
+                          {col.target_corr !== undefined
+                            ? ` • corr=${col.target_corr.toFixed(2)}`
+                            : ''}
+                        </div>
+
+                        {/* Mini-distribution bars */}
+                        {topEntries.length > 0 && (
+                          <div className="space-y-0.5 pt-0.5">
+                            {topEntries.map(([k, v]) => (
+                              <div key={k} className="flex items-center gap-1.5 text-[9px]">
+                                <span className="w-16 truncate text-[#9aa0a6]">{k}</span>
+                                <div className="flex-1 h-1.5 rounded bg-[#18191a] overflow-hidden">
+                                  <div
+                                    className="h-full bg-[#8ab4f8]/70"
+                                    style={{ width: `${Math.max(6, (v / maxTop) * 100)}%` }}
+                                  />
+                                </div>
+                                <span className="text-[#9aa0a6] w-8 text-right">{v}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
             </div>
 
             <div className="rounded border border-[#3c4043] bg-[#202124] overflow-hidden">
-              <div className="px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] text-[11px] font-medium text-[#e8eaed]">
-                df.head(5)
+              <div className="px-3 py-1.5 bg-[#252629] border-b border-[#3c4043] flex items-center justify-between gap-2">
+                <span className="text-[11px] font-medium text-[#e8eaed]">
+                  Preview Data (click header to sort)
+                </span>
+                <input
+                  type="text"
+                  value={rowSearch}
+                  onChange={(e) => setRowSearch(e.target.value)}
+                  placeholder="Lọc dòng..."
+                  className="w-28 bg-[#18191a] border border-[#3c4043] rounded px-1.5 py-0.5 text-[10px] text-[#e8eaed] focus:outline-none focus:border-[#8ab4f8]"
+                />
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-[11px] font-mono">
                   <thead>
                     <tr className="bg-[#18191a] border-b border-[#3c4043] text-[#9aa0a6]">
                       {dataProfile.columns.map((c) => (
-                        <th key={c.name} className="px-2 py-1 whitespace-nowrap font-normal">
+                        <th
+                          key={c.name}
+                          onClick={() =>
+                            setRowSort((prev) =>
+                              prev && prev.col === c.name
+                                ? { col: c.name, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+                                : { col: c.name, dir: 'asc' }
+                            )
+                          }
+                          className="px-2 py-1 whitespace-nowrap font-normal cursor-pointer hover:text-[#8ab4f8]"
+                        >
                           {c.name}
+                          {rowSort?.col === c.name ? (rowSort.dir === 'asc' ? ' ↑' : ' ↓') : ''}
                         </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#292a2d]">
-                    {dataProfile.head.map((row, rIdx) => (
+                    {dataProfile.head
+                      .filter((row) => {
+                        if (!rowSearch.trim()) return true;
+                        const q = rowSearch.toLowerCase();
+                        return Object.values(row).some((v) =>
+                          String(v ?? '').toLowerCase().includes(q)
+                        );
+                      })
+                      .slice()
+                      .sort((a, b) => {
+                        if (!rowSort) return 0;
+                        const va = a[rowSort.col];
+                        const vb = b[rowSort.col];
+                        const na = Number(va);
+                        const nb = Number(vb);
+                        const cmp =
+                          !Number.isNaN(na) && !Number.isNaN(nb)
+                            ? na - nb
+                            : String(va ?? '').localeCompare(String(vb ?? ''));
+                        return rowSort.dir === 'asc' ? cmp : -cmp;
+                      })
+                      .map((row, rIdx) => (
                       <tr key={rIdx}>
                         {dataProfile.columns.map((c) => {
                           const val = row[c.name];
@@ -788,6 +1074,37 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                 )}
               </div>
             )}
+
+            {/* Batch Predict CSV */}
+            <div className="p-3 rounded bg-[#202124] border border-[#3c4043] space-y-2">
+              <div className="text-xs font-medium text-[#e8eaed]">
+                Batch Predict (CSV hàng loạt)
+              </div>
+              <p className="text-[11px] text-[#9aa0a6] leading-snug">
+                Chọn file <code>.csv</code> mới (cùng cột feature) để chạy dự đoán hàng loạt qua{' '}
+                <code className="text-[#8ab4f8]">full_pipeline</code> và tải về ngay{' '}
+                <code>predicted_*.csv</code>.
+              </p>
+              <label className="block w-full text-center py-2 px-3 rounded border border-dashed border-[#3c4043] hover:border-[#8ab4f8] bg-[#18191a] text-xs font-mono text-[#8ab4f8] cursor-pointer">
+                {batchPredictLoading ? 'Đang dự đoán hàng loạt...' : 'Chọn file .csv để Batch Predict'}
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  disabled={batchPredictLoading}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onBatchPredictCsv(f);
+                    e.target.value = '';
+                  }}
+                  className="hidden"
+                />
+              </label>
+              {batchPredictMessage && (
+                <div className="text-[11px] font-mono text-[#81c995]">
+                  {batchPredictMessage}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -850,6 +1167,33 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                 ))
               )}
             </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!pipPkg.trim()) return;
+                onInstallPackage(pipPkg.trim());
+                setPipPkg('');
+              }}
+              className="px-2.5 py-1 bg-[#18191a] border-t border-[#292a2d] flex items-center gap-2"
+            >
+              <span className="font-mono text-[10px] text-[#81c995] shrink-0">
+                pip install
+              </span>
+              <input
+                type="text"
+                value={pipPkg}
+                onChange={(e) => setPipPkg(e.target.value)}
+                placeholder="VD: optuna, scipy, imbalanced-learn..."
+                className="flex-1 bg-transparent text-[11px] font-mono text-[#e8eaed] focus:outline-none placeholder:text-[#5f6368]"
+              />
+              <button
+                type="submit"
+                className="px-2 py-0.5 rounded bg-[#292a2d] hover:bg-[#3c4043] text-[10px] font-mono text-[#8ab4f8]"
+              >
+                Install
+              </button>
+            </form>
 
             <form
               onSubmit={handleQuickSubmit}

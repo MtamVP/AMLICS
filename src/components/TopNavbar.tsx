@@ -54,6 +54,9 @@ interface TopNavbarProps {
   onCreateWorkspace: () => void;
   onDeleteWorkspace: (id: string) => void;
   onOpenAiModal: () => void;
+  onRunModelArena: () => void;
+  onExportHtmlReport: () => void;
+  onOpenCommandPalette: () => void;
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
@@ -92,6 +95,9 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
   onCreateWorkspace,
   onDeleteWorkspace,
   onOpenAiModal,
+  onRunModelArena,
+  onExportHtmlReport,
+  onOpenCommandPalette,
 }) => {
   const [runMenuOpen, setRunMenuOpen] = useState(false);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
@@ -247,6 +253,15 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
                   </button>
                   <button
                     type="button"
+                    onClick={() => triggerMenuAction(onRunModelArena)}
+                    className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] flex items-center justify-between text-[#81c995] font-medium"
+                    title="Tự động chạy đua 5 thuật toán trên cùng CV split và chọn model điểm cao nhất"
+                  >
+                    <span>Run Model Arena (Top 5)</span>
+                    <span className="text-[10px] font-mono">Auto</span>
+                  </button>
+                  <button
+                    type="button"
                     disabled={!hasActiveCell}
                     onClick={() => triggerMenuAction(onRunActiveCell)}
                     className="w-full px-3 py-1.5 text-left hover:bg-[#3c4043] disabled:opacity-40 flex items-center justify-between"
@@ -338,6 +353,15 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             Export .ipynb
           </button>
 
+          <button
+            type="button"
+            onClick={onExportHtmlReport}
+            className="px-2 py-1 rounded text-xs text-[#e8eaed] hover:bg-[#303134] transition-colors"
+            title="Export standalone HTML report with Leaderboard & all plots"
+          >
+            Report .html
+          </button>
+
           {hasSubmissionCsv && (
             <button
               type="button"
@@ -351,8 +375,17 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
         </div>
       </div>
 
-      {/* Right: AI BYOK, Panel Toggles, Runtime Selector & Resource Pill */}
+      {/* Right: Command Palette, AI BYOK, Panel Toggles, Runtime Selector & Resource Pill */}
       <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenCommandPalette}
+          title="Command Palette (Ctrl+K)"
+          className="px-2 py-1 rounded text-[11px] font-mono bg-[#18191a] hover:bg-[#303134] text-[#9aa0a6] hover:text-[#e8eaed] border border-[#3c4043] transition-colors cursor-pointer"
+        >
+          Ctrl+K
+        </button>
+
         <button
           type="button"
           onClick={onOpenAiModal}

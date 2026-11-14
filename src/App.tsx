@@ -5,8 +5,13 @@ import { CenterNotebookPane } from './components/CenterNotebookPane';
 import { RightStudioPane, WhatIfResult } from './components/RightStudioPane';
 import { CloudConnectModal } from './components/CloudConnectModal';
 import { AiByokModal } from './components/AiByokModal';
+import {
+  CommandPaletteModal,
+  CommandPaletteAction,
+} from './components/CommandPaletteModal';
 import { computeAutoOptimizedConfig } from './utils/autoOptimizer';
 import { AiOptimizationPlan } from './utils/aiByokClient';
+import { exportStandaloneHtmlReport } from './utils/htmlReportExporter';
 import {
   createDefaultPipelineConfig,
   PUBLIC_URL_PRESETS,
@@ -31,6 +36,7 @@ import {
   DataProfile,
   ExperimentRecord,
   HardwareInfo,
+  ModelFamily,
   NotebookCell,
   NotebookWorkspaceMeta,
   PipelineConfig,
@@ -115,8 +121,14 @@ export function App() {
   const [cloudHardware, setCloudHardware] = useState<HardwareInfo | null>(null);
   const [isCloudModalOpen, setIsCloudModalOpen] = useState<boolean>(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState<boolean>(false);
+  const [isCmdPaletteOpen, setIsCmdPaletteOpen] = useState<boolean>(false);
   const [whatIfLoading, setWhatIfLoading] = useState<boolean>(false);
   const [whatIfResult, setWhatIfResult] = useState<WhatIfResult | null>(null);
+  const [batchPredictLoading, setBatchPredictLoading] = useState<boolean>(false);
+  const [batchPredictMessage, setBatchPredictMessage] = useState<string | null>(null);
+  const [rightTabOverride, setRightTabOverride] = useState<
+    'leaderboard' | 'diagnostics' | 'data' | 'predict' | null
+  >(null);
   const [workspaces, setWorkspaces] = useState<StoredWorkspaceSnapshot[]>(() => {
     try {
       const raw = localStorage.getItem(WORKSPACES_STORAGE_KEY);
@@ -163,6 +175,8 @@ export function App() {
   const pendingCellResolverRef = useRef<((success: boolean) => void) | null>(null);
   const stopRequestedRef = useRef<boolean>(false);
   const whatIfBufferRef = useRef<string>('');
+  const batchPredictBufferRef = useRef<string>('');
+  const batchPredictFileNameRef = useRef<string>('predicted.csv');
 
   const trainCsvInputRef = useRef<HTMLInputElement | null>(null);
   const testCsvInputRef = useRef<HTMLInputElement | null>(null);
@@ -472,6 +486,29 @@ export function App() {
         return;
       }
 
+      if (cell_id === 'batch_predict') {
+        setBatchPredictLoading(false);
+        const text = [batchPredictBufferRef.current, stdout_summary || '']
+          .filter(Boolean)
+          .join('\n');
+        batchPredictBufferRef.current = '';
+        const sIdx = text.indexOf('__BATCH_CSV_START__');
+        const eIdx = text.indexOf('__BATCH_CSV_END__');
+        if (sIdx !== -1 && eIdx !== -1 && eIdx > sIdx) {
+          const csvBody = text
+            .slice(sIdx + '__BATCH_CSV_START__'.length, eIdx)
+            .trim();
+          const outName = `predicted_${batchPredictFileNameRef.current}`;
+          triggerBrowserDownload(outName, csvBody);
+          setBatchPredictMessage(`Đã tải về ${outName} thành công!`);
+        } else {
+          setBatchPredictMessage(
+            text.trim() || 'Lỗi khi Batch Predict. Hãy chạy Run all trước.'
+          );
+        }
+        return;
+      }
+
       setCells((prev) =>
         prev.map((c) => {
           if (c.id !== cell_id) return c;
@@ -604,6 +641,10 @@ export function App() {
           whatIfBufferRef.current += text;
           return;
         }
+        if (cellId === 'batch_predict') {
+          batchPredictBufferRef.current += text;
+          return;
+        }
         appendCliLog(stream || 'stdout', text, cellId);
         if (cellId) {
           setCells((prev) =>
@@ -673,6 +714,10 @@ export function App() {
       onLogChunk: ({ cell_id, stream, text }) => {
         if (cell_id === 'whatif_predict') {
           whatIfBufferRef.current += text;
+          return;
+        }
+        if (cell_id === 'batch_predict') {
+          batchPredictBufferRef.current += text;
           return;
         }
         appendCliLog(stream, text, cell_id);
@@ -1624,6 +1669,301 @@ ${metricLines}`;
     [...cliLogs].reverse().find((l) => l.stream === 'stderr')?.text ||
     '';
 
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCmdPaletteOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  const handleRunModelArena = async () => {
+    if (isPipelineRunning || runningCellId) return;
+    const arenaModels: ModelFamily[] = [
+      'HistGradientBoosting',
+      'XGBoost',
+      'LightGBM',
+      'RandomForest',
+      'LinearModel',
+    ];
+    setIsPipelineRunning(true);
+    stopRequestedRef.current = false;
+    appendCliLog(
+      'system',
+      `[Model Arena] Bắt đầu chạy đua ${arenaModels.length} thuật toán: ${arenaModels.join(', ')}...`
+    );
+
+    try {
+      // Ensure prep cells (1, 2, 3) have run once
+      const prepCells = cellsRef.current.filter(
+        (c) =>
+          c.cellType === 'code' &&
+          (c.stepType === 'data_load' ||
+            c.stepType === 'preprocess' ||
+            c.stepType === 'split_cv')
+      );
+      for (const c of prepCells) {
+        if (stopRequestedRef.current) break;
+        if (c.status !== 'success') {
+          const ok = await executeSingleCell(c.id);
+          if (!ok) {
+            setIsPipelineRunning(false);
+            return;
+          }
+        }
+      }
+
+      const baseConfig = configRef.current;
+      for (const mf of arenaModels) {
+        if (stopRequestedRef.current) break;
+        const nextCfg: PipelineConfig = {
+          ...baseConfig,
+          modelFamily: mf,
+          tuningStrategy: 'none',
+          autoSelectedFields: Array.from(
+            new Set([...(baseConfig.autoSelectedFields || []), 'modelFamily'])
+          ),
+        };
+        setConfig(nextCfg);
+        const rebuilt = buildAllPipelineCells(nextCfg, cellsRef.current);
+        cellsRef.current = rebuilt;
+        setCells(rebuilt);
+
+        const trainCell = rebuilt.find((c) => c.stepType === 'model_train');
+        const evalCell = rebuilt.find((c) => c.stepType === 'evaluate');
+        if (trainCell) {
+          const okTrain = await executeSingleCell(trainCell.id);
+          if (!okTrain || stopRequestedRef.current) continue;
+        }
+        if (evalCell) {
+          await executeSingleCell(evalCell.id);
+        }
+      }
+
+      appendCliLog(
+        'system',
+        '[Model Arena] Đã hoàn tất chạy đua! Xem bảng xếp hạng Leaderboard ở cột phải.'
+      );
+      setRightTabOverride('leaderboard');
+    } finally {
+      setIsPipelineRunning(false);
+    }
+  };
+
+  const handleBatchPredictCsv = async (file: File) => {
+    setBatchPredictLoading(true);
+    setBatchPredictMessage(null);
+    batchPredictFileNameRef.current = file.name;
+    batchPredictBufferRef.current = '';
+    const csvText = await file.text();
+    const b64 = btoa(unescape(encodeURIComponent(csvText)));
+    const code = [
+      'import base64, io, pandas as pd',
+      "if 'full_pipeline' not in globals():",
+      "    print('Chưa train full_pipeline. Hãy bấm Run all trước.')",
+      'else:',
+      `    _raw = base64.b64decode('${b64}').decode('utf-8')`,
+      '    _bdf = pd.read_csv(io.StringIO(_raw))',
+      '    _req = list(X_train.columns)',
+      '    _missing = [c for c in _req if c not in _bdf.columns]',
+      '    if _missing:',
+      "        print(f'Thiếu cột so với lúc train: {_missing}')",
+      '    else:',
+      '        _out_df = _bdf.copy()',
+      "        _out_df['prediction'] = full_pipeline.predict(_bdf[_req])",
+      "        if hasattr(full_pipeline, 'predict_proba') and len(getattr(full_pipeline, 'classes_', [])) == 2:",
+      "            _out_df['probability'] = full_pipeline.predict_proba(_bdf[_req])[:, 1].round(6)",
+      "        print('__BATCH_CSV_START__')",
+      '        print(_out_df.to_csv(index=False))',
+      "        print('__BATCH_CSV_END__')",
+    ].join('\n');
+
+    if (runtimeMode === 'cloud') {
+      if (!cloudConnected || cloudWorkerStatus === 'offline') {
+        setBatchPredictLoading(false);
+        setBatchPredictMessage('Cloud runtime chưa kết nối.');
+        return;
+      }
+      cloudBrokerRef.current?.sendRunCell({
+        id: 'batch_predict',
+        order: 999,
+        cellType: 'code',
+        stepType: 'custom',
+        title: 'Batch Predict',
+        subtitle: '',
+        generatedCode: code,
+        currentCode: code,
+        isLocked: true,
+        status: 'running',
+        outputText: '',
+        figures: [],
+      });
+    } else {
+      pyodideWorkerRef.current?.postMessage({
+        type: 'run_cell',
+        payload: { cellId: 'batch_predict', code },
+      });
+    }
+  };
+
+  const handleDropHighMissing = () => {
+    if (!dataProfile) return;
+    const highMissing = dataProfile.columns
+      .filter((c) => c.name !== config.targetColumn && c.missing_pct >= 50)
+      .map((c) => c.name);
+    if (highMissing.length === 0) {
+      appendCliLog('system', '[Data Surgery] Không có cột nào thiếu >= 50% dữ liệu.');
+      return;
+    }
+    setConfig((p) => ({
+      ...p,
+      numericColumns: p.numericColumns.filter((c) => !highMissing.includes(c)),
+      categoricalColumns: p.categoricalColumns.filter((c) => !highMissing.includes(c)),
+      dropColumns: Array.from(new Set([...p.dropColumns, ...highMissing])),
+    }));
+    appendCliLog('system', `[Data Surgery] Đã drop ${highMissing.length} cột >50% NaN: [${highMissing.join(', ')}]`);
+  };
+
+  const handleDropLeakageCols = () => {
+    if (!dataProfile) return;
+    const leaky = dataProfile.columns
+      .filter(
+        (c) =>
+          c.name !== config.targetColumn &&
+          c.target_corr !== undefined &&
+          Math.abs(c.target_corr) >= 0.95
+      )
+      .map((c) => c.name);
+    if (leaky.length === 0) {
+      appendCliLog('system', '[Data Surgery] Không phát hiện cột có |corr| >= 0.95 với Target.');
+      return;
+    }
+    setConfig((p) => ({
+      ...p,
+      numericColumns: p.numericColumns.filter((c) => !leaky.includes(c)),
+      categoricalColumns: p.categoricalColumns.filter((c) => !leaky.includes(c)),
+      dropColumns: Array.from(new Set([...p.dropColumns, ...leaky])),
+    }));
+    appendCliLog('system', `[Data Surgery] Đã drop ${leaky.length} cột nghi Leakage: [${leaky.join(', ')}]`);
+  };
+
+  const handleInsertDatetimeCell = () => {
+    const code = [
+      '# [Feature Engineering] Auto-extract Year, Month, DayOfWeek from datetime-like columns',
+      'import pandas as pd',
+      '_date_cols = []',
+      'for _col in df.select_dtypes(include=["object", "string"]).columns:',
+      '    if _col == TARGET_COL: continue',
+      '    _parsed = pd.to_datetime(df[_col], errors="coerce")',
+      '    if _parsed.notna().mean() > 0.7:',
+      '        df[f"{_col}_year"] = _parsed.dt.year',
+      '        df[f"{_col}_month"] = _parsed.dt.month',
+      '        df[f"{_col}_dayofweek"] = _parsed.dt.dayofweek',
+      '        _date_cols.append(_col)',
+      'print(f"Extracted datetime features from: {_date_cols}" if _date_cols else "No datetime string columns detected.")',
+    ].join('\n');
+    handleInsertAiCell('Tách đặc trưng Datetime (Year/Month/DayOfWeek)', code);
+  };
+
+  const handleInstallPackage = (pkg: string) => {
+    const clean = pkg.replace(/[^a-zA-Z0-9_.\-\s]/g, '').trim();
+    if (!clean) return;
+    if (runtimeMode === 'cloud') {
+      handleRunQuickCommand(`!pip install -q ${clean}`);
+    } else {
+      handleRunQuickCommand(
+        `import micropip; await micropip.install(${JSON.stringify(clean.split(/\s+/))}); print("Installed: ${clean}")`
+      );
+    }
+  };
+
+  const handleExportHtmlReport = () => {
+    exportStandaloneHtmlReport(
+      projectName,
+      config,
+      dataProfile,
+      experiments,
+      cells
+    );
+    appendCliLog('system', `Exported standalone report: ${projectName}_report.html`);
+  };
+
+  const commandPaletteActions: CommandPaletteAction[] = [
+    {
+      id: 'run-all',
+      label: 'Run all cells',
+      category: 'Run',
+      shortcut: 'All',
+      onSelect: handleRunAllCells,
+    },
+    {
+      id: 'run-arena',
+      label: 'Run Model Arena (Chạy đua Top 5 thuật toán)',
+      category: 'Run',
+      onSelect: handleRunModelArena,
+    },
+    {
+      id: 'auto-opt',
+      label: 'Smart Auto-Optimize (Chọn cấu hình điểm cao nhất)',
+      category: 'Auto',
+      onSelect: handleAutoOptimize,
+    },
+    {
+      id: 'open-ai',
+      label: 'Mở AMLICS Plugin AI (Multi-Key BYOK)',
+      category: 'AI',
+      onSelect: () => setIsAiModalOpen(true),
+    },
+    {
+      id: 'new-nb',
+      label: 'Tạo Notebook mới',
+      category: 'File',
+      onSelect: handleCreateWorkspace,
+    },
+    {
+      id: 'export-html',
+      label: 'Export Standalone HTML Report (.html)',
+      category: 'Export',
+      onSelect: handleExportHtmlReport,
+    },
+    {
+      id: 'export-ipynb',
+      label: 'Export Jupyter Notebook (.ipynb)',
+      category: 'Export',
+      onSelect: () => exportPipelineToIpynb(projectName, config, cells),
+    },
+    {
+      id: 'tab-lb',
+      label: 'Mở tab Leaderboard',
+      category: 'View',
+      onSelect: () => {
+        setShowRightPanel(true);
+        setRightTabOverride('leaderboard');
+      },
+    },
+    {
+      id: 'tab-data',
+      label: 'Mở tab Data Explorer & Warnings',
+      category: 'View',
+      onSelect: () => {
+        setShowRightPanel(true);
+        setRightTabOverride('data');
+      },
+    },
+    {
+      id: 'tab-predict',
+      label: 'Mở tab Try / Predict & Batch CSV',
+      category: 'View',
+      onSelect: () => {
+        setShowRightPanel(true);
+        setRightTabOverride('predict');
+      },
+    },
+  ];
+
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#18191a] text-[#e8eaed]">
       {/* Hidden File Inputs */}
@@ -1690,6 +2030,9 @@ ${metricLines}`;
         onCreateWorkspace={handleCreateWorkspace}
         onDeleteWorkspace={handleDeleteWorkspace}
         onOpenAiModal={() => setIsAiModalOpen(true)}
+        onRunModelArena={handleRunModelArena}
+        onExportHtmlReport={handleExportHtmlReport}
+        onOpenCommandPalette={() => setIsCmdPaletteOpen(true)}
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -1758,6 +2101,14 @@ ${metricLines}`;
               onWhatIfPredict={handleWhatIfPredict}
               whatIfLoading={whatIfLoading}
               whatIfResult={whatIfResult}
+              onBatchPredictCsv={handleBatchPredictCsv}
+              batchPredictLoading={batchPredictLoading}
+              batchPredictMessage={batchPredictMessage}
+              onDropHighMissing={handleDropHighMissing}
+              onDropLeakageCols={handleDropLeakageCols}
+              onInsertDatetimeCell={handleInsertDatetimeCell}
+              onInstallPackage={handleInstallPackage}
+              externalTab={rightTabOverride}
             />
           </div>
         )}
@@ -1816,6 +2167,12 @@ ${metricLines}`;
         lastErrorText={lastErrorText}
         onApplyAiOptimization={handleApplyAiOptimization}
         onInsertAiCell={handleInsertAiCell}
+      />
+
+      <CommandPaletteModal
+        isOpen={isCmdPaletteOpen}
+        onClose={() => setIsCmdPaletteOpen(false)}
+        actions={commandPaletteActions}
       />
     </div>
   );
