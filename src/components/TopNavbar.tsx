@@ -150,7 +150,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             </button>
 
             {wsMenuOpen && (
-              <div className="absolute left-0 top-full mt-1 w-64 bg-[#292a2d] border border-[#3c4043] rounded shadow-xl py-1 z-50 text-xs">
+              <div className="absolute left-0 top-full mt-1 w-64 max-h-64 overflow-y-auto custom-scrollbar bg-[#292a2d] border border-[#3c4043] rounded shadow-xl py-1 z-50 text-xs">
                 <div className="px-3 py-1 text-[10px] font-mono text-[#9aa0a6] uppercase tracking-wider flex items-center justify-between">
                   <span>Notebooks ({workspaces.length})</span>
                   <button
@@ -242,7 +242,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               </button>
 
               {runMenuOpen && (
-                <div className="absolute left-0 top-full mt-1 w-64 rounded border border-[#3c4043] bg-[#292a2d] shadow-xl py-1 text-xs text-[#e8eaed] z-50">
+                <div className="absolute left-0 top-full mt-1 w-64 max-h-64 overflow-y-auto custom-scrollbar rounded border border-[#3c4043] bg-[#292a2d] shadow-xl py-1 text-xs text-[#e8eaed] z-50">
                   <button
                     type="button"
                     onClick={() => triggerMenuAction(onRunAllCells)}

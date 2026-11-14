@@ -418,7 +418,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
             </button>
 
             {openDropdown === 'templates' && (
-              <div className="absolute left-0 top-full mt-1 w-80 max-h-[65vh] overflow-y-auto custom-scrollbar rounded border border-[#3c4043] bg-[#292a2d] shadow-xl py-1 z-50">
+              <div className="absolute left-0 top-full mt-1 w-80 max-h-64 overflow-y-auto custom-scrollbar rounded border border-[#3c4043] bg-[#292a2d] shadow-xl py-1 z-50">
                 <div className="sticky top-0 bg-[#292a2d] px-3 py-1 text-[10px] font-mono text-[#9aa0a6] border-b border-[#3c4043]">
                   Áp dụng cho: {activeDatasetName || 'dataset hiện tại'}
                 </div>
@@ -462,7 +462,7 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
             </button>
 
             {openDropdown === 'snippets' && (
-              <div className="absolute left-0 top-full mt-1 w-80 max-h-[65vh] overflow-y-auto custom-scrollbar rounded border border-[#3c4043] bg-[#292a2d] shadow-xl py-1 z-50">
+              <div className="absolute left-0 top-full mt-1 w-80 max-h-64 overflow-y-auto custom-scrollbar rounded border border-[#3c4043] bg-[#292a2d] shadow-xl py-1 z-50">
                 <div className="sticky top-0 bg-[#292a2d] px-3 py-1 text-[10px] font-mono text-[#81c995] border-b border-[#3c4043]">
                   Chèn cell cho: {activeDatasetName || 'df'}
                 </div>
