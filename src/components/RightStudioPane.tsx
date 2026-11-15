@@ -635,6 +635,8 @@ export const RightStudioPane: React.FC<RightStudioPaneProps> = ({
                                 ? 'Auto'
                                 : exp.configSource === 'tournament'
                                 ? 'Tour'
+                                : exp.configSource === 'custom_code'
+                                ? 'Code'
                                 : 'Manual'}
                             </span>
                             <span>

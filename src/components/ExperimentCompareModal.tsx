@@ -27,6 +27,10 @@ const PROVENANCE_LABEL: Record<
     text: 'Auto-Tournament',
     cls: 'bg-[#81c995]/15 border-[#81c995]/40 text-[#81c995]',
   },
+  custom_code: {
+    text: 'Custom Code',
+    cls: 'bg-[#fdd663]/15 border-[#fdd663]/40 text-[#fdd663]',
+  },
   manual: {
     text: 'Thủ công (Manual)',
     cls: 'bg-[#3c4043]/40 border-[#5f6368]/50 text-[#e8eaed]',

@@ -944,14 +944,14 @@ else:
     for _sc in _sub_cols:
         submission_data[_sc] = (_preds.astype(str) == _sc).astype(float)`
     : isClass && expectsProba
-    ? `sub_preds = full_pipeline.predict_proba(sub_X)[:, 1] if hasattr(full_pipeline, "predict_proba") and len(np.unique(y_train)) == 2 else full_pipeline.predict(sub_X)
+    ? `sub_preds = full_pipeline.predict_proba(sub_X)[:, 1] if hasattr(full_pipeline, "predict_proba") and len(np.unique(y_train if 'y_train' in globals() else y_test)) == 2 else full_pipeline.predict(sub_X)
 submission_data[${singleTargetCol ? `'${singleTargetCol}'` : 'TARGET_COL'}] = np.round(sub_preds, 6) if np.issubdtype(np.asarray(sub_preds).dtype, np.number) else sub_preds`
     : `sub_preds = full_pipeline.predict(sub_X)
 submission_data[${singleTargetCol ? `'${singleTargetCol}'` : 'TARGET_COL'}] = np.round(sub_preds, 6) if np.issubdtype(np.asarray(sub_preds).dtype, np.number) else sub_preds`;
 
   const submissionExportBlock = `
 # Export predictions to submission.csv (uses df_test if loaded and schema matches, otherwise holdout X_test)
-_req_cols = list(X_train.columns)
+_req_cols = list(X_train.columns) if 'X_train' in globals() and hasattr(X_train, 'columns') else (list(X_test.columns) if hasattr(X_test, 'columns') else [])
 _use_df_test = (
     'df_test' in globals()
     and isinstance(df_test, pd.DataFrame)
@@ -962,26 +962,51 @@ if 'df_test' in globals() and isinstance(df_test, pd.DataFrame) and not _use_df_
     print("Note: Loaded df_test columns do not match trained features; using holdout X_test for submission.csv.")
 elif not _use_df_test:
     print("Note: No test.csv loaded — generating submission.csv from Holdout X_test split.")
-sub_source_df = df_test if _use_df_test else clean_df.loc[X_test.index]
+sub_source_df = df_test if _use_df_test else (clean_df.loc[X_test.index] if 'clean_df' in globals() and hasattr(X_test, 'index') else X_test)
 if _use_df_test:
     sub_X = sub_source_df[_req_cols].copy()
     sub_X = sub_X.replace([np.inf, -np.inf], np.nan)
-    for _nc in numeric_features:
+    for _nc in globals().get('numeric_features', []):
         if _nc in sub_X.columns:
             sub_X[_nc] = pd.to_numeric(sub_X[_nc].astype(str).str.replace(',', '', regex=False), errors='coerce') if sub_X[_nc].dtype == object else pd.to_numeric(sub_X[_nc], errors='coerce')
-    for _cc in categorical_features:
+    for _cc in globals().get('categorical_features', []):
         if _cc in sub_X.columns:
             sub_X[_cc] = sub_X[_cc].where(sub_X[_cc].notna(), np.nan).apply(lambda _v: str(_v) if pd.notna(_v) else np.nan)
 else:
     sub_X = X_test.copy()
 id_col_name = '${idCol}'
-_id_vals = sub_source_df[id_col_name].values if id_col_name in sub_source_df.columns else (sub_source_df.iloc[:, 0].values if len(sub_source_df.columns) > 0 else np.arange(len(sub_X)))
+_id_vals = sub_source_df[id_col_name].values if hasattr(sub_source_df, 'columns') and id_col_name in sub_source_df.columns else (sub_source_df.iloc[:, 0].values if hasattr(sub_source_df, 'iloc') and len(sub_source_df.columns) > 0 else np.arange(len(sub_X)))
 submission_data = {id_col_name: _id_vals}
 ${predCode}
 submission_df = pd.DataFrame(submission_data)
 submission_df.to_csv('/tmp/submission.csv', index=False) if os.path.exists('/tmp') else None
 submission_df.to_csv('submission.csv', index=False)
 print(f"Saved submission.csv ({len(submission_df):,} rows, columns: {list(submission_df.columns)})")`;
+
+  const customBridgePrelude = `# Auto-resolve custom user model & metric variables if Cell 1-4 were written manually
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+if 'full_pipeline' not in globals():
+    for _cand_name in ('pipeline', 'pipe', 'best_model', 'search', 'model', 'clf', 'reg', 'estimator'):
+        if _cand_name in globals() and (hasattr(globals()[_cand_name], 'predict') or hasattr(globals()[_cand_name], 'best_estimator_')):
+            full_pipeline = getattr(globals()[_cand_name], 'best_estimator_', globals()[_cand_name])
+            break
+if 'full_pipeline' not in globals():
+    raise NameError("Chưa tìm thấy mô hình đã huấn luyện (full_pipeline / model / clf / reg / estimator). Hãy chạy Cell Train trước.")
+_final_est = full_pipeline.steps[-1][1] if hasattr(full_pipeline, 'steps') and getattr(full_pipeline, 'steps', None) else full_pipeline
+if 'ACTIVE_MODEL_NAME' not in globals():
+    ACTIVE_MODEL_NAME = type(_final_est).__name__
+if 'DATASET_NAME' not in globals():
+    DATASET_NAME = 'custom_dataset.csv'
+if 'TARGET_COL' not in globals():
+    TARGET_COL = getattr(globals().get('y_test'), 'name', None) or 'target'
+numeric_features = globals().get('numeric_features', list(X_test.select_dtypes(include=[np.number]).columns) if hasattr(X_test, 'select_dtypes') else [])
+categorical_features = globals().get('categorical_features', [c for c in X_test.columns if c not in numeric_features] if hasattr(X_test, 'columns') else [])
+cv_mean = float(globals().get('cv_mean', 0.0))
+cv_std = float(globals().get('cv_std', 0.0))
+train_score = float(globals().get('train_score', 0.0))`;
 
   if (isClass) {
     return `# [5] Holdout Evaluation, Diagnostics & submission.csv Export
@@ -991,22 +1016,28 @@ from sklearn.metrics import (
 )
 from sklearn.inspection import permutation_importance
 
-y_pred = full_pipeline.predict(X_test)
-if hasattr(full_pipeline, "predict_proba") and len(np.unique(y_test)) == 2:
-    y_prob = full_pipeline.predict_proba(X_test)[:, 1]
-    auc_val = float(roc_auc_score(y_test, y_prob))
-else:
-    y_prob = y_pred.astype(float)
-    auc_val = float(f1_score(y_test, y_pred, average='weighted'))
+${customBridgePrelude}
 
+y_pred = full_pipeline.predict(X_test)
+_uniq_y = np.unique(y_test)
+_pos_lbl = (full_pipeline.classes_[-1] if hasattr(full_pipeline, 'classes_') and len(full_pipeline.classes_) == 2 else (_uniq_y[-1] if len(_uniq_y) == 2 else None))
+if hasattr(full_pipeline, "predict_proba") and len(_uniq_y) == 2:
+    y_prob = full_pipeline.predict_proba(X_test)[:, 1]
+    auc_val = float(roc_auc_score((y_test == _pos_lbl).astype(int) if not np.issubdtype(np.asarray(y_test).dtype, np.number) else y_test, y_prob))
+else:
+    y_prob = (y_pred == _pos_lbl).astype(float) if _pos_lbl is not None else np.zeros(len(y_pred), dtype=float)
+    auc_val = float(f1_score(y_test, y_pred, average='weighted', zero_division=0))
+
+_bin_avg = 'binary' if len(_uniq_y) == 2 else 'weighted'
 acc = float(accuracy_score(y_test, y_pred))
-prec = float(precision_score(y_test, y_pred, average='binary' if len(np.unique(y_test)) == 2 else 'weighted', zero_division=0))
-rec = float(recall_score(y_test, y_pred, average='binary' if len(np.unique(y_test)) == 2 else 'weighted', zero_division=0))
-f1 = float(f1_score(y_test, y_pred, average='binary' if len(np.unique(y_test)) == 2 else 'weighted', zero_division=0))
+prec = float(precision_score(y_test, y_pred, average=_bin_avg, pos_label=_pos_lbl if _bin_avg == 'binary' else 1, zero_division=0) if len(_uniq_y) == 2 else precision_score(y_test, y_pred, average='weighted', zero_division=0))
+rec = float(recall_score(y_test, y_pred, average=_bin_avg, pos_label=_pos_lbl if _bin_avg == 'binary' else 1, zero_division=0) if len(_uniq_y) == 2 else recall_score(y_test, y_pred, average='weighted', zero_division=0))
+f1 = float(f1_score(y_test, y_pred, average=_bin_avg, pos_label=_pos_lbl if _bin_avg == 'binary' else 1, zero_division=0) if len(_uniq_y) == 2 else f1_score(y_test, y_pred, average='weighted', zero_division=0))
 cm = confusion_matrix(y_test, y_pred).tolist()
 
-if len(np.unique(y_test)) == 2:
-    fpr_arr, tpr_arr, _ = roc_curve(y_test, y_prob)
+if len(_uniq_y) == 2:
+    _y_bin = (y_test == _pos_lbl).astype(int) if not np.issubdtype(np.asarray(y_test).dtype, np.number) else y_test
+    fpr_arr, tpr_arr, _ = roc_curve(_y_bin, y_prob)
 else:
     fpr_arr, tpr_arr = np.array([0.0, 1.0]), np.array([0.0, 1.0])
 
@@ -1019,12 +1050,12 @@ if roc_points[-1]["fpr"] < 1.0:
     roc_points.append({"fpr": 1.0, "tpr": 1.0})
 
 # Subsample X_test if > 2000 rows so permutation_importance stays fast
-X_perm = X_test.iloc[:2000] if len(X_test) > 2000 else X_test
-y_perm = y_test.iloc[:2000] if len(y_test) > 2000 else y_test
+X_perm = (X_test.iloc[:2000] if hasattr(X_test, 'iloc') else X_test[:2000]) if len(X_test) > 2000 else X_test
+y_perm = (y_test.iloc[:2000] if hasattr(y_test, 'iloc') else y_test[:2000]) if len(y_test) > 2000 else y_test
 perm_res = permutation_importance(
     full_pipeline, X_perm, y_perm, n_repeats=4, random_state=42
 )
-raw_feat_names = numeric_features + categorical_features
+raw_feat_names = (list(X_test.columns) if hasattr(X_test, 'columns') else [f'f{i}' for i in range(X_test.shape[1])]) if len(numeric_features) + len(categorical_features) == 0 else (numeric_features + categorical_features)
 fi_pairs = sorted(
     zip(raw_feat_names, perm_res.importances_mean),
     key=lambda x: abs(x[1]),
@@ -1099,17 +1130,19 @@ _automl_experiment_result = {
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
 from sklearn.inspection import permutation_importance
 
+${customBridgePrelude}
+
 y_pred = full_pipeline.predict(X_test)
 rmse_val = float(root_mean_squared_error(y_test, y_pred))
 mae_val = float(mean_absolute_error(y_test, y_pred))
 r2_val = float(r2_score(y_test, y_pred))
 
-X_perm = X_test.iloc[:2000] if len(X_test) > 2000 else X_test
-y_perm = y_test.iloc[:2000] if len(y_test) > 2000 else y_test
+X_perm = (X_test.iloc[:2000] if hasattr(X_test, 'iloc') else X_test[:2000]) if len(X_test) > 2000 else X_test
+y_perm = (y_test.iloc[:2000] if hasattr(y_test, 'iloc') else y_test[:2000]) if len(y_test) > 2000 else y_test
 perm_res = permutation_importance(
     full_pipeline, X_perm, y_perm, n_repeats=4, random_state=42, scoring='r2'
 )
-raw_feat_names = numeric_features + categorical_features
+raw_feat_names = (list(X_test.columns) if hasattr(X_test, 'columns') else [f'f{i}' for i in range(X_test.shape[1])]) if len(numeric_features) + len(categorical_features) == 0 else (numeric_features + categorical_features)
 fi_pairs = sorted(
     zip(raw_feat_names, perm_res.importances_mean),
     key=lambda x: abs(x[1]),

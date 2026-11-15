@@ -47,6 +47,10 @@ import {
   StoredByokState,
 } from './utils/aiByokClient';
 import {
+  mergeRuntimeIntrospectionIntoConfig,
+  parseCodeIntoConfigPatch,
+} from './utils/codeToConfigSync';
+import {
   CellType,
   CliLogEntry,
   ConfigProvenance,
@@ -59,6 +63,7 @@ import {
   PipelineConfig,
   PipelineTemplateId,
   QuickSnippetId,
+  RuntimeIntrospection,
   RuntimeMode,
   SupabaseCredentials,
   WorkerStatus,
@@ -588,6 +593,7 @@ export function App() {
       html_output?: string;
       figures_base64?: string[];
       experiment_record?: Record<string, unknown> | null;
+      runtime_introspection?: RuntimeIntrospection | null;
       has_submission_csv?: boolean;
       namespace_vars?: string[];
       runtime_info?: HardwareInfo;
@@ -600,6 +606,7 @@ export function App() {
         html_output,
         figures_base64,
         experiment_record,
+        runtime_introspection,
         has_submission_csv,
         namespace_vars,
         runtime_info,
@@ -686,11 +693,33 @@ export function App() {
         })
       );
 
+      const curConfigBeforeIntrospection = configRef.current;
+      const introspectionMerge =
+        status === 'success' && runtime_introspection
+          ? mergeRuntimeIntrospectionIntoConfig(
+              curConfigBeforeIntrospection,
+              runtime_introspection
+            )
+          : {
+              nextConfig: curConfigBeforeIntrospection,
+              resolvedModelName:
+                curConfigBeforeIntrospection.customModelName ||
+                curConfigBeforeIntrospection.modelFamily,
+              changed: false,
+            };
+
+      if (introspectionMerge.changed) {
+        setConfig(introspectionMerge.nextConfig);
+      }
+
       if (experiment_record && status === 'success') {
-        const curConfig = configRef.current;
+        const curConfig = introspectionMerge.nextConfig;
         const curCells = cellsRef.current;
         const isCloud = runtimeModeRef.current === 'cloud';
         const hw = cloudHardwareRef.current;
+        const hasLockedPipelineCode = curCells.some(
+          (c) => c.cellType === 'code' && c.stepType !== 'custom' && c.isLocked
+        ) || curCells.some((c) => c.stepType === 'custom' && c.status === 'success');
 
         setExperiments((prevExps) => {
           const nextRunNum =
@@ -711,7 +740,7 @@ export function App() {
               experiment_record.target_column || curConfig.targetColumn
             ),
             modelName: String(
-              experiment_record.model_name || curConfig.modelFamily
+              experiment_record.model_name || introspectionMerge.resolvedModelName || curConfig.modelFamily
             ),
             modelFamily: curConfig.modelFamily,
             taskType:
@@ -723,6 +752,8 @@ export function App() {
             configSource:
               configProvenanceRef.current !== 'manual'
                 ? configProvenanceRef.current
+                : hasLockedPipelineCode
+                ? 'custom_code'
                 : curConfig.autoSelectedFields && curConfig.autoSelectedFields.length > 0
                 ? 'auto_advisor'
                 : 'manual',
@@ -1365,18 +1396,41 @@ export function App() {
   }, [runtimeMode, runningCellId, appendCliLog, initPyodideWorker]);
 
   const handleEditCellCode = (cellId: string, newCode: string) => {
-    setCells((prev) =>
-      prev.map((c) =>
-        c.id === cellId
-          ? {
-              ...c,
-              currentCode: newCode,
-              isLocked: c.cellType === 'code' ? true : c.isLocked,
-            }
-          : c
-      )
+    const nextCells = cellsRef.current.map((c) =>
+      c.id === cellId
+        ? {
+            ...c,
+            currentCode: newCode,
+            isLocked: c.cellType === 'code' ? true : c.isLocked,
+          }
+        : c
     );
+    cellsRef.current = nextCells;
+    setCells(nextCells);
+
+    const editedCell = nextCells.find((c) => c.id === cellId);
+    if (editedCell && editedCell.cellType === 'code') {
+      const synced = parseCodeIntoConfigPatch(nextCells, configRef.current, cellId);
+      if (synced) {
+        setConfig(synced.nextConfig);
+      }
+    }
   };
+
+  const handleUnlockAllPipelineCells = useCallback(() => {
+    const unlocked = cellsRef.current.map((c) =>
+      c.cellType === 'code' && c.stepType !== 'custom'
+        ? { ...c, isLocked: false }
+        : c
+    );
+    const rebuilt = buildAllPipelineCells(configRef.current, unlocked);
+    cellsRef.current = rebuilt;
+    setCells(rebuilt);
+    appendCliLog(
+      'system',
+      '[UI Sync] Đã mở khóa & đồng bộ cấu hình từ thanh Pipeline bên trái xuống toàn bộ cell.'
+    );
+  }, [appendCliLog]);
 
   const handleRenameCell = (cellId: string, newTitle: string) => {
     setCells((prev) =>
@@ -1433,9 +1487,12 @@ export function App() {
   };
 
   const handleToggleLockCell = (cellId: string) => {
-    setCells((prev) =>
-      prev.map((c) => (c.id === cellId ? { ...c, isLocked: !c.isLocked } : c))
+    const toggled = cellsRef.current.map((c) =>
+      c.id === cellId ? { ...c, isLocked: !c.isLocked } : c
     );
+    const updated = buildAllPipelineCells(configRef.current, toggled);
+    cellsRef.current = updated;
+    setCells(updated);
   };
 
   const handleResetCellToTemplate = (cellId: string) => {
@@ -2933,9 +2990,15 @@ ${metricLines}`;
               runtimeMode={runtimeMode}
               dataProfile={dataProfile}
               availableCloudFiles={cloudHardware?.available_files || []}
+              lockedPipelineCount={
+                cells.filter(
+                  (c) => c.cellType === 'code' && c.stepType !== 'custom' && c.isLocked
+                ).length
+              }
               urlLoading={urlLoading}
               urlError={urlError}
               onChangeConfig={setConfig}
+              onUnlockAllPipelineCells={handleUnlockAllPipelineCells}
               onUploadCsvClick={() => trainCsvInputRef.current?.click()}
               onUploadTestCsvClick={() => testCsvInputRef.current?.click()}
               onUploadSampleSubCsvClick={() => sampleSubInputRef.current?.click()}

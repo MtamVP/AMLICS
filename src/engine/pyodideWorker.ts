@@ -196,6 +196,52 @@ def _execute_notebook_cell(code_str: str):
         exec(compile(tree, '<cell>', 'exec'), globals())
         return None
 
+def _introspect_active_model():
+    g = globals()
+    cand_names = ('full_pipeline', 'pipeline', 'pipe', 'best_model', 'search', 'model', 'clf', 'reg', 'estimator')
+    chosen = None
+    for _nm in cand_names:
+        _obj = g.get(_nm)
+        if _obj is not None and (hasattr(_obj, 'predict') or hasattr(_obj, 'best_estimator_')):
+            chosen = _obj
+            if 'full_pipeline' not in g:
+                g['full_pipeline'] = _obj
+            break
+    if chosen is None:
+        return None
+    final_est = getattr(chosen, 'best_estimator_', chosen)
+    if hasattr(final_est, 'steps') and getattr(final_est, 'steps', None):
+        final_est = final_est.steps[-1][1]
+    model_class = type(final_est).__name__
+    params = {}
+    if hasattr(final_est, 'get_params'):
+        try:
+            for _pk, _pv in final_est.get_params(deep=False).items():
+                if isinstance(_pv, (bool, int, float, str)) or _pv is None:
+                    params[str(_pk)] = _pv
+        except Exception:
+            pass
+    inferred_task = None
+    _cname_low = model_class.lower()
+    if hasattr(final_est, 'predict_proba') or 'classifier' in _cname_low or 'logistic' in _cname_low or model_class == 'SVC':
+        inferred_task = 'classification'
+    elif 'regressor' in _cname_low or 'regression' in _cname_low or model_class in ('Ridge', 'Lasso', 'ElasticNet', 'SVR'):
+        inferred_task = 'regression'
+    res = {
+        "model_class": model_class,
+        "model_name": str(g.get('ACTIVE_MODEL_NAME') or model_class),
+        "params": params,
+    }
+    if inferred_task:
+        res["task_type"] = inferred_task
+    if isinstance(g.get('TARGET_COL'), str):
+        res["target_col"] = g.get('TARGET_COL')
+    for _mk in ('cv_mean', 'cv_std', 'train_score'):
+        _mv = g.get(_mk)
+        if isinstance(_mv, (int, float)):
+            res[_mk] = float(_mv)
+    return res
+
 def _collect_execution_artifacts():
     global _last_emitted_profile_json, _automl_experiment_result, _last_html_output
     figs = []
@@ -213,12 +259,14 @@ def _collect_execution_artifacts():
         _last_emitted_profile_json = json.dumps(_extract_data_profile_dict(globals()['df'], ds_name))
 
     has_sub = os.path.exists('/tmp/submission.csv') or os.path.exists('submission.csv')
+    introspection = _introspect_active_model()
 
     payload = {
         "figures": figs,
         "html_output": _last_html_output,
         "data_profile": json.loads(_last_emitted_profile_json) if _last_emitted_profile_json else None,
         "experiment_record": _automl_experiment_result,
+        "runtime_introspection": introspection,
         "has_submission_csv": has_sub,
         "namespace_vars": [k for k in globals().keys() if not k.startswith('_')]
     }
@@ -454,6 +502,7 @@ _execute_notebook_cell(_cell_src)
           html_output: artifacts.html_output || undefined,
           figures_base64: artifacts.figures || [],
           experiment_record: artifacts.experiment_record || null,
+          runtime_introspection: artifacts.runtime_introspection || null,
           has_submission_csv: Boolean(artifacts.has_submission_csv),
           namespace_vars: artifacts.namespace_vars || [],
         },

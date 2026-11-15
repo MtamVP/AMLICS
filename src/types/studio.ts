@@ -104,6 +104,19 @@ export interface PipelineConfig {
 
   // Danh sách các trường đã được Auto-Optimize / AI BYOK tự động chọn (hiển thị nhãn [Auto])
   autoSelectedFields?: string[];
+  // Tên model tùy biến nếu người dùng tự code một estimator ngoài 12 model chuẩn
+  customModelName?: string | null;
+}
+
+export interface RuntimeIntrospection {
+  model_class?: string;
+  model_name?: string;
+  task_type?: TaskType;
+  target_col?: string;
+  params?: Record<string, string | number | boolean | null>;
+  cv_mean?: number;
+  cv_std?: number;
+  train_score?: number;
 }
 
 export interface NotebookWorkspaceMeta {
@@ -209,7 +222,7 @@ export interface ExperimentMetrics {
   cv_std?: number;
 }
 
-export type ConfigProvenance = 'manual' | 'auto_advisor' | 'ai_copilot' | 'tournament';
+export type ConfigProvenance = 'manual' | 'auto_advisor' | 'ai_copilot' | 'tournament' | 'custom_code';
 
 export interface ExperimentRecord {
   id: string;

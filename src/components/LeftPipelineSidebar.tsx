@@ -24,9 +24,11 @@ interface LeftPipelineSidebarProps {
   runtimeMode: RuntimeMode;
   dataProfile: DataProfile | null;
   availableCloudFiles: string[];
+  lockedPipelineCount?: number;
   urlLoading: boolean;
   urlError: string | null;
   onChangeConfig: (updater: (prev: PipelineConfig) => PipelineConfig) => void;
+  onUnlockAllPipelineCells?: () => void;
   onUploadCsvClick: () => void;
   onUploadTestCsvClick: () => void;
   onUploadSampleSubCsvClick: () => void;
@@ -58,9 +60,11 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
   runtimeMode,
   dataProfile,
   availableCloudFiles,
+  lockedPipelineCount = 0,
   urlLoading,
   urlError,
   onChangeConfig,
+  onUnlockAllPipelineCells,
   onUploadCsvClick,
   onUploadTestCsvClick,
   onUploadSampleSubCsvClick,
@@ -183,6 +187,25 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
               </span>{' '}
               mục (chỉnh tay sẽ tự gỡ).
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Custom Code <-> UI Bidirectional Sync Notice */}
+      {lockedPipelineCount > 0 && (
+        <div className="px-3.5 py-2 bg-[#2a2417] border-b border-[#fdd663]/30 flex items-center justify-between gap-2 text-[10px]">
+          <span className="text-[#fdd663] leading-snug">
+            {lockedPipelineCount} cell đang dùng <strong>Custom Code</strong> (thanh bên trái tự đọc từ code).
+          </span>
+          {onUnlockAllPipelineCells && (
+            <button
+              type="button"
+              onClick={onUnlockAllPipelineCells}
+              title="Mở khóa các cell Pipeline để đẩy cấu hình từ thanh bên trái xuống code"
+              className="shrink-0 px-2 py-1 rounded bg-[#fdd663] hover:bg-[#fde293] text-[#18191a] font-semibold transition-colors"
+            >
+              UI → Code
+            </button>
           )}
         </div>
       )}
@@ -1269,6 +1292,7 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     onChangeConfig((p) => ({
                       ...p,
                       modelFamily: e.target.value as ModelFamily,
+                      customModelName: null,
                       autoSelectedFields: stripAuto(p, 'modelFamily'),
                     }))
                   }
@@ -1280,6 +1304,11 @@ export const LeftPipelineSidebar: React.FC<LeftPipelineSidebarProps> = ({
                     </option>
                   ))}
                 </select>
+                {config.customModelName && (
+                  <div className="mt-1.5 px-2 py-1 rounded bg-[#fdd663]/10 border border-[#fdd663]/30 text-[10px] font-mono text-[#fdd663]">
+                    Đang dùng Custom Model từ code: <strong>{config.customModelName}</strong>
+                  </div>
+                )}
               </div>
 
               <div

@@ -856,11 +856,11 @@ export const CenterNotebookPane: React.FC<CenterNotebookPaneProps> = ({
                       }`}
                       title={
                         cell.isLocked
-                          ? 'Locked (custom code). Click to unlock.'
-                          : 'Synced with UI sidebar.'
+                          ? 'Custom Code (UI đang đồng bộ đọc từ code; bấm để mở khóa cho phép UI ghi xuống lại)'
+                          : 'UI Synced (Tự cập nhật khi chỉnh thanh bên trái)'
                       }
                     >
-                      {cell.isLocked ? 'Locked' : 'UI Synced'}
+                      {cell.isLocked ? 'Custom Code' : 'UI Synced'}
                     </button>
 
                     {cell.isLocked && cell.stepType !== 'custom' && (

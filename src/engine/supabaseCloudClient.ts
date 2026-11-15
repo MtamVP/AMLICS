@@ -5,6 +5,7 @@ import {
   HardwareInfo,
   NotebookCell,
   PipelineConfig,
+  RuntimeIntrospection,
   SupabaseCredentials,
 } from '../types/studio';
 
@@ -95,6 +96,7 @@ export interface CloudBroadcastCallbacks {
     html_output?: string;
     figures_base64?: string[];
     experiment_record?: Record<string, unknown> | null;
+    runtime_introspection?: RuntimeIntrospection | null;
     has_submission_csv?: boolean;
     runtime_info?: HardwareInfo;
   }) => void;
@@ -464,6 +466,38 @@ GLOBAL_NS = {"__name__": "__main__", "pd": pd, "np": np, "plt": plt, "SESSION_ID
 GLOBAL_NS["_emit_data_profile"] = lambda df, name="Cloud_Dataset.csv": ev_q.put(("data_profile", extract_profile(df, name)))
 worker_state = {"status": "idle", "thread": None, "exec_id": None, "cell_id": None}
 
+def introspect_active_model(ns):
+    for _nm in ("full_pipeline", "pipeline", "pipe", "best_model", "search", "model", "clf", "reg", "estimator"):
+        _obj = ns.get(_nm)
+        if _obj is not None and (hasattr(_obj, "predict") or hasattr(_obj, "best_estimator_")):
+            if "full_pipeline" not in ns:
+                ns["full_pipeline"] = _obj
+            final_est = getattr(_obj, "best_estimator_", _obj)
+            if hasattr(final_est, "steps") and getattr(final_est, "steps", None):
+                final_est = final_est.steps[-1][1]
+            model_class = type(final_est).__name__
+            params = {}
+            if hasattr(final_est, "get_params"):
+                try:
+                    for _pk, _pv in final_est.get_params(deep=False).items():
+                        if isinstance(_pv, (bool, int, float, str)) or _pv is None:
+                            params[str(_pk)] = _pv
+                except Exception: pass
+            inferred_task = None
+            _clow = model_class.lower()
+            if hasattr(final_est, "predict_proba") or "classifier" in _clow or "logistic" in _clow or model_class == "SVC":
+                inferred_task = "classification"
+            elif "regressor" in _clow or "regression" in _clow or model_class in ("Ridge", "Lasso", "ElasticNet", "SVR"):
+                inferred_task = "regression"
+            res = {"model_class": model_class, "model_name": str(ns.get("ACTIVE_MODEL_NAME") or model_class), "params": params}
+            if inferred_task: res["task_type"] = inferred_task
+            if isinstance(ns.get("TARGET_COL"), str): res["target_col"] = ns.get("TARGET_COL")
+            for _mk in ("cv_mean", "cv_std", "train_score"):
+                _mv = ns.get(_mk)
+                if isinstance(_mv, (int, float)): res[_mk] = float(_mv)
+            return res
+    return None
+
 def run_cell_job(payload):
     cid, eid, code = payload.get("cell_id", "cell"), payload.get("execution_id", "exec"), payload.get("code", "")
     worker_state["status"], worker_state["exec_id"], worker_state["cell_id"] = "busy", eid, cid
@@ -500,7 +534,7 @@ def run_cell_job(payload):
         figs.append("data:image/png;base64," + base64.b64encode(b.read()).decode())
     plt.close("all")
     has_sub = os.path.exists("/tmp/submission.csv") or os.path.exists("submission.csv")
-    ev_q.put(("cell_result", {"cell_id": cid, "execution_id": eid, "status": status, "duration_ms": dur, "stdout_summary": c_out.buf.getvalue()[-10000:], "html_output": html_out, "figures_base64": figs, "experiment_record": GLOBAL_NS.get("_automl_experiment_result"), "has_submission_csv": has_sub, "namespace_vars": [k for k in GLOBAL_NS if not k.startswith("_")], "runtime_info": detect_hw()}))
+    ev_q.put(("cell_result", {"cell_id": cid, "execution_id": eid, "status": status, "duration_ms": dur, "stdout_summary": c_out.buf.getvalue()[-10000:], "html_output": html_out, "figures_base64": figs, "experiment_record": GLOBAL_NS.get("_automl_experiment_result"), "runtime_introspection": introspect_active_model(GLOBAL_NS), "has_submission_csv": has_sub, "namespace_vars": [k for k in GLOBAL_NS if not k.startswith("_")], "runtime_info": detect_hw()}))
     worker_state["status"] = "idle"
 
 async def main_daemon():

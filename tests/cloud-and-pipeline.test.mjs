@@ -35,6 +35,8 @@ function bundleAndLoad(relPath) {
 const proxyMod = bundleAndLoad('functions/api/proxy-csv.ts');
 const codeGenMod = bundleAndLoad('src/engine/codeGenerator.ts');
 const cloudMod = bundleAndLoad('src/engine/supabaseCloudClient.ts');
+const codeSyncMod = bundleAndLoad('src/utils/codeToConfigSync.ts');
+const sampleDsMod = bundleAndLoad('src/data/sampleDatasets.ts');
 
 test('URL normalization handles GitHub, Drive, Sheets, Dropbox, HuggingFace, GitLab', () => {
   const cases = [
@@ -301,6 +303,131 @@ test('New ML Learning Quick Snippets (learning_curve, error_analysis, threshold_
     ];
     const pyFile = path.join(tmpDir, 'run_snippets.py');
     fs.writeFileSync(pyFile, scriptParts.join('\n'), 'utf8');
+    execFileSync('python', [pyFile], { stdio: 'pipe', timeout: 60000 });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('Code-to-Config sync parses user edits to model, hyperparameters, CV split, and runtime introspection', () => {
+  const baseCfg = sampleDsMod.createDefaultPipelineConfig();
+  const cells = codeGenMod.buildAllPipelineCells(baseCfg);
+  const editedCells = cells.map((c) => {
+    if (c.stepType === 'model_train') {
+      return {
+        ...c,
+        isLocked: true,
+        currentCode: `from xgboost import XGBClassifier
+estimator = XGBClassifier(
+    n_estimators=420,
+    learning_rate=0.03,
+    max_depth=9,
+    subsample=0.75,
+    random_state=77
+)`,
+      };
+    }
+    if (c.stepType === 'split_cv') {
+      return {
+        ...c,
+        isLocked: true,
+        currentCode: `X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
+cv_splitter = GroupKFold(n_splits=8)
+GROUP_COL = 'user_id'`,
+      };
+    }
+    return c;
+  });
+
+  const parsed = codeSyncMod.parseCodeIntoConfigPatch(editedCells, baseCfg);
+  assert.ok(parsed);
+  assert.equal(parsed.nextConfig.modelFamily, 'XGBoost');
+  assert.equal(parsed.nextConfig.hyperparameters.nEstimators, 420);
+  assert.equal(parsed.nextConfig.hyperparameters.learningRate, 0.03);
+  assert.equal(parsed.nextConfig.hyperparameters.maxDepth, 9);
+  assert.equal(parsed.nextConfig.hyperparameters.subsample, 0.75);
+  assert.equal(parsed.nextConfig.hyperparameters.randomState, 77);
+  assert.equal(parsed.nextConfig.testSize, 0.3);
+  assert.equal(parsed.nextConfig.cvFolds, 8);
+  assert.equal(parsed.nextConfig.cvStrategy, 'group_kfold');
+  assert.equal(parsed.nextConfig.groupColumn, 'user_id');
+
+  // Custom estimator outside the 12 built-in families
+  const customCells = [
+    ...editedCells,
+    {
+      id: 'cell_custom_1',
+      order: 10,
+      cellType: 'code',
+      stepType: 'custom',
+      title: 'Custom Model',
+      subtitle: 'Custom',
+      generatedCode: '',
+      currentCode: `from sklearn.ensemble import AdaBoostClassifier
+clf = AdaBoostClassifier(n_estimators=95, learning_rate=0.4, random_state=9)`,
+      isLocked: true,
+      status: 'idle',
+      outputText: '',
+      figures: [],
+    },
+  ];
+  const parsedCustom = codeSyncMod.parseCodeIntoConfigPatch(customCells, parsed.nextConfig, 'cell_custom_1');
+  assert.ok(parsedCustom);
+  assert.equal(parsedCustom.nextConfig.customModelName, 'AdaBoostClassifier');
+  assert.equal(parsedCustom.nextConfig.hyperparameters.nEstimators, 95);
+  assert.equal(parsedCustom.nextConfig.hyperparameters.learningRate, 0.4);
+
+  // Runtime introspection merge from executed Python object
+  const merged = codeSyncMod.mergeRuntimeIntrospectionIntoConfig(baseCfg, {
+    model_class: 'RandomForestRegressor',
+    params: { n_estimators: 333, max_depth: 11, min_samples_leaf: 4, random_state: 123 },
+    target_col: 'SalePrice',
+  });
+  assert.equal(merged.nextConfig.modelFamily, 'RandomForest');
+  assert.equal(merged.nextConfig.taskType, 'regression');
+  assert.equal(merged.nextConfig.targetColumn, 'SalePrice');
+  assert.equal(merged.nextConfig.hyperparameters.nEstimators, 333);
+  assert.equal(merged.nextConfig.hyperparameters.maxDepth, 11);
+});
+
+test('Custom user Python model (clf with string labels & skipped CV globals) evaluates cleanly with Cell 5', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'amlics_custom_'));
+  try {
+    const cfg = sampleDsMod.createDefaultPipelineConfig();
+    const evalCode = codeGenMod.generateCell5Evaluate({
+      ...cfg,
+      taskType: 'classification',
+      idColumnForSubmission: 'id',
+    });
+
+    const customUserCode = `
+import numpy as np, pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+rng = np.random.RandomState(42)
+X = pd.DataFrame({'f1': rng.randn(80), 'f2': rng.randn(80)})
+y = pd.Series(np.where(X['f1'] + 0.3 * rng.randn(80) > 0, 'Yes', 'No'), name='Outcome')
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42, stratify=y)
+clf = RandomForestClassifier(n_estimators=20, max_depth=4, random_state=42)
+clf.fit(X_train, y_train)
+`;
+
+    const script = [
+      'import os',
+      'import matplotlib',
+      'matplotlib.use("Agg")',
+      `os.chdir(${JSON.stringify(tmpDir)})`,
+      'GLOBAL_NS = {}',
+      `exec(${JSON.stringify(customUserCode)}, GLOBAL_NS)`,
+      `exec(${JSON.stringify(evalCode)}, GLOBAL_NS)`,
+      'res = GLOBAL_NS.get("_automl_experiment_result")',
+      'assert res is not None, "missing experiment result"',
+      'assert res["model_name"] == "RandomForestClassifier", f"got {res[\'model_name\']}"',
+      'assert os.path.exists("submission.csv"), "missing submission.csv"',
+    ].join('\n');
+
+    const pyFile = path.join(tmpDir, 'run_custom.py');
+    fs.writeFileSync(pyFile, script, 'utf8');
     execFileSync('python', [pyFile], { stdio: 'pipe', timeout: 60000 });
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
