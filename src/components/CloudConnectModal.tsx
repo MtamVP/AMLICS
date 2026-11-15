@@ -300,9 +300,11 @@ export const CloudConnectModal: React.FC<CloudConnectModalProps> = ({
             </div>
 
             <div className="mt-2 p-2.5 rounded bg-[#202124] border border-[#3c4043] text-[11px] text-[#9aa0a6] space-y-1">
-              <div className="font-medium text-[#e8eaed]">Lưu ý quan trọng khi chạy Colab / Kaggle:</div>
+              <div className="font-medium text-[#e8eaed]">Cách hoạt động & Lưu ý quan trọng (Colab / Kaggle):</div>
+              <div>• <span className="text-[#e8eaed]">Chạy ngầm không khóa Colab:</span> Cell kết nối sẽ tự chạy ngầm trên background thread và hoàn tất sau ~2–5 giây — bạn vẫn có thể tạo & chạy cell mới ngay trên Colab dùng chung biến với AMLICS Web Studio.</div>
+              <div>• <span className="text-[#e8eaed]">Đồng bộ 2 chiều qua Web Studio:</span> Mọi nút <b>Run / Run all</b>, vẽ biểu đồ, Leaderboard và bài học <b>Học ML (108)</b> trên web AMLICS sẽ gửi code sang Colab thực thi và trả kết quả về lại giao diện AMLICS (Colab không tự chèn thêm cell mới vào file .ipynb của bạn).</div>
               <div>• <span className="text-[#e8eaed]">Kaggle:</span> Bắt buộc bật <span className="text-[#fdd663]">Internet ON</span> ở thanh Settings bên phải Notebook để Worker cài thư viện và kết nối WebSocket. Dữ liệu cuộc thi tự động nhận ở <code className="text-[#8ab4f8]">/kaggle/input/...</code>.</div>
-              <div>• <span className="text-[#e8eaed]">Google Colab:</span> Để đọc file Drive cá nhân (Private), mount Drive bằng <code className="text-[#8ab4f8]">drive.mount('/content/drive')</code> trước khi chạy pipeline.</div>
+              <div>• <span className="text-[#e8eaed]">Google Colab:</span> Để đọc file Drive cá nhân (Private), mount Drive bằng <code className="text-[#8ab4f8]">drive.mount('/content/drive')</code> ở cell bất kỳ trên Colab.</div>
               <div>• <span className="text-[#e8eaed]">Import bằng URL:</span> Chỉ hỗ trợ link <b>Public</b> (Google Drive phải bật <i>"Anyone with the link"</i>). Link Private sẽ bị chặn 403.</div>
             </div>
           </div>

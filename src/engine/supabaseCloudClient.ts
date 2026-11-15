@@ -462,9 +462,11 @@ def stop_thread(t):
         ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(t.ident), ctypes.py_object(KeyboardInterrupt))
 
 log_q, ev_q = queue.Queue(), queue.Queue()
-GLOBAL_NS = {"__name__": "__main__", "pd": pd, "np": np, "plt": plt, "SESSION_ID": SESSION_ID}
+GLOBAL_NS = globals()
+GLOBAL_NS.update({"pd": pd, "np": np, "plt": plt, "SESSION_ID": SESSION_ID})
 GLOBAL_NS["_emit_data_profile"] = lambda df, name="Cloud_Dataset.csv": ev_q.put(("data_profile", extract_profile(df, name)))
 worker_state = {"status": "idle", "thread": None, "exec_id": None, "cell_id": None}
+_connected_ev = threading.Event()
 
 def introspect_active_model(ns):
     for _nm in ("full_pipeline", "pipeline", "pipe", "best_model", "search", "model", "clf", "reg", "estimator"):
@@ -537,24 +539,25 @@ def run_cell_job(payload):
     ev_q.put(("cell_result", {"cell_id": cid, "execution_id": eid, "status": status, "duration_ms": dur, "stdout_summary": c_out.buf.getvalue()[-10000:], "html_output": html_out, "figures_base64": figs, "experiment_record": GLOBAL_NS.get("_automl_experiment_result"), "runtime_introspection": introspect_active_model(GLOBAL_NS), "has_submission_csv": has_sub, "namespace_vars": [k for k in GLOBAL_NS if not k.startswith("_")], "runtime_info": detect_hw()}))
     worker_state["status"] = "idle"
 
-async def main_daemon():
+async def main_daemon(stop_ev):
     host = SUPABASE_URL.rstrip("/").split("://", 1)[-1]
     ws_url = f"wss://{host}/realtime/v1/websocket?apikey={SUPABASE_ANON_KEY}&vsn=1.0.0"
     topic = f"realtime:session:{SESSION_ID}"
     hw = detect_hw()
     print(f"AMLICS Cloud Worker started on {hw['platform']} ({hw['gpu']}, RAM {hw['ram_total_gb']}GB)")
     ref = 1
-    while True:
+    while not stop_ev.is_set():
         try:
             async with websockets.connect(ws_url, ping_interval=20, max_size=16*1024*1024) as ws:
                 await ws.send(json.dumps({"topic": topic, "event": "phx_join", "payload": {"config": {"broadcast": {"ack": False, "self": False}}}, "ref": "1"}))
-                print("CONNECTED TO AMLICS WEB STUDIO! You can minimize this tab now.")
+                print("CONNECTED TO AMLICS WEB STUDIO! Running in background — you can keep running other Colab cells freely.")
+                _connected_ev.set()
                 async def bcast(ev, data):
                     nonlocal ref; ref += 1
                     await ws.send(json.dumps({"topic": topic, "event": "broadcast", "payload": {"type": "broadcast", "event": ev, "payload": data}, "ref": str(ref)}))
                 await bcast("heartbeat", {"session_id": SESSION_ID, "status": worker_state["status"], "runtime_info": detect_hw(), "namespace_vars": [k for k in GLOBAL_NS if not k.startswith("_")], "ts": int(time.time()*1000)})
                 last_hb = time.time()
-                while True:
+                while not stop_ev.is_set():
                     try:
                         msg = json.loads(await asyncio.wait_for(ws.recv(), timeout=0.18))
                         if msg.get("event") == "broadcast":
@@ -607,8 +610,26 @@ async def main_daemon():
         except KeyboardInterrupt:
             print("Worker stopped."); break
         except Exception as e:
+            if stop_ev.is_set():
+                break
             print(f"Reconnecting ({e})..."); await asyncio.sleep(3)
 
-asyncio.get_event_loop().run_until_complete(main_daemon())
+if isinstance(globals().get("_amlics_stop_ev"), threading.Event):
+    globals()["_amlics_stop_ev"].set()
+_amlics_stop_ev = threading.Event()
+
+def _amlics_bg_loop(stop_ev):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(main_daemon(stop_ev))
+    finally:
+        loop.close()
+
+_connected_ev.clear()
+_amlics_worker_thread = threading.Thread(target=_amlics_bg_loop, args=(_amlics_stop_ev,), daemon=True)
+_amlics_worker_thread.start()
+if not _connected_ev.wait(timeout=8.0):
+    print("AMLICS Worker is still connecting in background — check Web Studio status indicator.")
 `;
 }

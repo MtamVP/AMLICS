@@ -155,6 +155,8 @@ test('Cloud Worker script includes cell_id, thread join, namespace_vars, upload_
   assert.ok(pyScript.includes('old_t.join(timeout=1.5)'));
   assert.ok(pyScript.includes('"namespace_vars": [k for k in GLOBAL_NS if not k.startswith("_")]'));
   assert.ok(pyScript.includes('elif ev == "upload_csv":'));
+  assert.ok(pyScript.includes('threading.Thread(target=_amlics_bg_loop'));
+  assert.ok(pyScript.includes('GLOBAL_NS = globals()'));
 
   const tmpPy = path.join(os.tmpdir(), `amlics_worker_${Date.now()}.py`);
   const pyNoMagic = pyScript
