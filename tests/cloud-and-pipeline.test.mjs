@@ -433,3 +433,98 @@ clf.fit(X_train, y_train)
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('curriculum defines 108 unique lessons across 12 tracks with valid datasets and sections', () => {
+  const curriculumMod = bundleAndLoad('src/data/curriculum/index.ts');
+  const dsMod = bundleAndLoad('src/data/curriculumDatasets.ts');
+
+  const tracks = curriculumMod.CURRICULUM_TRACKS;
+  const lessons = curriculumMod.ALL_LESSONS;
+  assert.equal(tracks.length, 12, 'expected 12 curriculum tracks');
+  assert.equal(lessons.length, 108, 'expected 108 lessons total (>100)');
+
+  const trackIds = new Set(tracks.map((t) => t.id));
+  const seenIds = new Set();
+  const seenOrders = new Set();
+
+  for (let i = 0; i < lessons.length; i++) {
+    const l = lessons[i];
+    assert.ok(!seenIds.has(l.id), `duplicate lesson id ${l.id}`);
+    seenIds.add(l.id);
+    assert.ok(!seenOrders.has(l.order), `duplicate lesson order ${l.order}`);
+    seenOrders.add(l.order);
+    assert.equal(l.order, i + 1, `expected sequential order ${i + 1} for ${l.id}`);
+    assert.ok(trackIds.has(l.trackId), `invalid trackId ${l.trackId} on ${l.id}`);
+    assert.ok(l.objectives.length >= 1, `${l.id} missing objectives`);
+    assert.ok(l.sections.length >= 1, `${l.id} missing sections`);
+    assert.ok(l.exercise.starterCode.trim().length > 0, `${l.id} missing starterCode`);
+    assert.ok(l.exercise.solutionCode.trim().length > 0, `${l.id} missing solutionCode`);
+    assert.ok(l.exercise.checkPython.trim().length > 0, `${l.id} missing checkPython`);
+    for (const dsId of l.datasetIds) {
+      assert.ok(dsMod.CURRICULUM_DATASETS[dsId], `${l.id} references unknown dataset ${dsId}`);
+    }
+  }
+});
+
+test('all 108 curriculum lessons solutionCode pass q1.check() auto-grader in real Python', () => {
+  const curriculumMod = bundleAndLoad('src/data/curriculum/index.ts');
+  const graderMod = bundleAndLoad('src/engine/curriculumGrader.ts');
+  const lessons = curriculumMod.ALL_LESSONS;
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'amlics-curriculum-'));
+  try {
+    const lessonScripts = lessons.map((l) => ({
+      id: l.id,
+      title: l.title,
+      code: graderMod.buildLessonExecutionCode(l, l.exercise.solutionCode, true),
+    }));
+
+    const runnerPy = `
+import os, io, sys, json, contextlib, traceback
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+os.chdir(${JSON.stringify(tmpDir)})
+lessons = json.loads(${JSON.stringify(JSON.stringify(lessonScripts))})
+failures = []
+
+for item in lessons:
+    lid = item["id"]
+    buf = io.StringIO()
+    ns = {"__name__": "__main__"}
+    passed = False
+    msg = ""
+    try:
+        with contextlib.redirect_stdout(buf):
+            exec(compile(item["code"], f"<{lid}>", "exec"), ns)
+        out = buf.getvalue()
+        marker = "__AMLICS_GRADE__:"
+        idx = out.rfind(marker)
+        if idx != -1:
+            line = out[idx + len(marker):].splitlines()[0]
+            parsed = json.loads(line)
+            passed = bool(parsed.get("passed"))
+            msg = str(parsed.get("message", ""))
+        else:
+            msg = "Missing __AMLICS_GRADE__ output"
+    except Exception as exc:
+        msg = f"{type(exc).__name__}: {exc}\\n{traceback.format_exc()}"
+    finally:
+        plt.close("all")
+    if not passed:
+        failures.append({"id": lid, "title": item["title"], "msg": msg})
+
+print(json.dumps({"total": len(lessons), "failures": failures}, ensure_ascii=False))
+assert len(failures) == 0, f"{len(failures)} lessons failed: " + json.dumps([{"id": x["id"], "msg": x["msg"][:260]} for x in failures], ensure_ascii=False)
+`;
+    const pyFile = path.join(tmpDir, 'run_all_108.py');
+    fs.writeFileSync(pyFile, runnerPy, 'utf8');
+    const out = execFileSync('python', [pyFile], { encoding: 'utf8', timeout: 180000 });
+    const summary = JSON.parse(out.trim().split('\n').pop());
+    assert.equal(summary.total, 108);
+    assert.deepEqual(summary.failures, []);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

@@ -4,6 +4,10 @@ import { TopNavbar } from './components/TopNavbar';
 import { LeftPipelineSidebar } from './components/LeftPipelineSidebar';
 import { CenterNotebookPane } from './components/CenterNotebookPane';
 import { RightStudioPane, WhatIfResult } from './components/RightStudioPane';
+import {
+  AdhocPythonExecResult,
+  LearningCenterView,
+} from './components/LearningCenterView';
 import { CloudConnectModal } from './components/CloudConnectModal';
 import { AiByokModal } from './components/AiByokModal';
 import {
@@ -68,6 +72,12 @@ import {
   SupabaseCredentials,
   WorkerStatus,
 } from './types/studio';
+import { LessonProgressState } from './types/curriculum';
+import { ALL_LESSONS } from './data/curriculum';
+import {
+  buildDatasetMaterializerPython,
+  CURRICULUM_DATASETS,
+} from './data/curriculumDatasets';
 import {
   loadCsvFileFromCache,
   loadWorkspaceStateFromCache,
@@ -84,6 +94,7 @@ const EXP_STORAGE_KEY = 'amlics_experiments_v2';
 const CONFIG_STORAGE_KEY = 'amlics_pipeline_config_v2';
 const WORKSPACES_STORAGE_KEY = 'amlics_workspaces_v1';
 const ACTIVE_WS_STORAGE_KEY = 'amlics_active_workspace_v1';
+const LESSON_PROGRESS_STORAGE_KEY = 'amlics_curriculum_progress_v1';
 
 interface StoredWorkspaceSnapshot extends NotebookWorkspaceMeta {
   config: PipelineConfig;
@@ -118,6 +129,32 @@ function detectViewportMode(): ViewportMode {
 }
 
 export function App() {
+  const [appMode, setAppMode] = useState<'studio' | 'learn'>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('mode') === 'learn' ? 'learn' : 'studio';
+    } catch {
+      return 'studio';
+    }
+  });
+  const [initialLessonId] = useState<string | null>(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('lesson');
+    } catch {
+      return null;
+    }
+  });
+  const [lessonProgress, setLessonProgress] = useState<
+    Record<string, LessonProgressState>
+  >(() => {
+    try {
+      const raw = localStorage.getItem(LESSON_PROGRESS_STORAGE_KEY);
+      return raw ? (JSON.parse(raw) as Record<string, LessonProgressState>) : {};
+    } catch {
+      return {};
+    }
+  });
+
   const [projectName, setProjectName] = useState<string>('AMLICS_Pipeline_Notebook');
   const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>('pyodide');
 
@@ -293,6 +330,15 @@ export function App() {
   const whatIfBufferRef = useRef<string>('');
   const batchPredictBufferRef = useRef<string>('');
   const batchPredictFileNameRef = useRef<string>('predicted.csv');
+  const adhocResolversRef = useRef<
+    Map<
+      string,
+      {
+        logs: string;
+        resolve: (res: AdhocPythonExecResult) => void;
+      }
+    >
+  >(new Map());
 
   const trainCsvInputRef = useRef<HTMLInputElement | null>(null);
   const testCsvInputRef = useRef<HTMLInputElement | null>(null);
@@ -352,6 +398,17 @@ export function App() {
       // ignore
     }
   }, [config]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        LESSON_PROGRESS_STORAGE_KEY,
+        JSON.stringify(lessonProgress)
+      );
+    } catch {
+      // ignore
+    }
+  }, [lessonProgress]);
 
   // Hydrate cached workspace state (cells + dataProfile) & cached CSVs from IndexedDB on mount
   useEffect(() => {
@@ -622,6 +679,24 @@ export function App() {
         setHasSubmissionCsv(true);
       }
 
+      if (cell_id.startsWith('learn_')) {
+        const entry = adhocResolversRef.current.get(cell_id);
+        if (entry) {
+          adhocResolversRef.current.delete(cell_id);
+          const combinedStdout = [entry.logs, stdout_summary || '']
+            .filter(Boolean)
+            .join(entry.logs && stdout_summary ? '\n' : '');
+          entry.resolve({
+            status,
+            durationMs: duration_ms,
+            stdout: combinedStdout,
+            htmlOutput: html_output,
+            figures: figures_base64 || [],
+          });
+        }
+        return;
+      }
+
       if (cell_id === 'whatif_predict') {
         setWhatIfLoading(false);
         const text = [whatIfBufferRef.current, stdout_summary || '']
@@ -843,6 +918,13 @@ export function App() {
         setPyodideStatus(status);
         if (message) setPyodideStatusText(message);
       } else if (type === 'log_chunk') {
+        if (cellId && cellId.startsWith('learn_')) {
+          const entry = adhocResolversRef.current.get(cellId);
+          if (entry && text) {
+            entry.logs += text;
+          }
+          return;
+        }
         if (cellId === 'whatif_predict') {
           whatIfBufferRef.current += text;
           return;
@@ -918,6 +1000,13 @@ export function App() {
   useEffect(() => {
     const broker = new SupabaseCloudBroker(sessionId, supabaseCreds, {
       onLogChunk: ({ cell_id, stream, text }) => {
+        if (cell_id && cell_id.startsWith('learn_')) {
+          const entry = adhocResolversRef.current.get(cell_id);
+          if (entry && text) {
+            entry.logs += text;
+          }
+          return;
+        }
         if (cell_id === 'whatif_predict') {
           whatIfBufferRef.current += text;
           return;
@@ -2221,6 +2310,30 @@ ${metricLines}`;
         }
       }
 
+      // Merge remote Curriculum Lesson Progress if available
+      const remoteProgress = res.uiPreferences?.lessonProgress as
+        | Record<string, LessonProgressState>
+        | undefined;
+      if (remoteProgress && typeof remoteProgress === 'object') {
+        setLessonProgress((prev) => {
+          const merged: Record<string, LessonProgressState> = { ...prev };
+          for (const [lid, rState] of Object.entries(remoteProgress)) {
+            const cur = merged[lid];
+            if (!cur) {
+              merged[lid] = rState;
+            } else {
+              merged[lid] = {
+                completed: Boolean(cur.completed || rState.completed),
+                attempts: Math.max(cur.attempts || 0, rState.attempts || 0),
+                lastCode: cur.lastCode ?? rState.lastCode,
+                completedAt: cur.completedAt || rState.completedAt,
+              };
+            }
+          }
+          return merged;
+        });
+      }
+
       if (res.notebooks.length > 0) {
         const localOnlyBlankDefault =
           workspaces.length === 1 &&
@@ -2314,7 +2427,7 @@ ${metricLines}`;
     const setRes = await pushUserSettingsToSupabase(supabaseCreds, syncKey, {
       activeWorkspaceId,
       byokState: getStoredByokState(),
-      uiPreferences: { runtimeMode },
+      uiPreferences: { runtimeMode, lessonProgress },
     });
     if (!setRes.ok) {
       lastErr = setRes.error;
@@ -2349,6 +2462,7 @@ ${metricLines}`;
     experiments,
     selectedExpId,
     runtimeMode,
+    lessonProgress,
   ]);
 
   pushAllToCloudRef.current = handlePushAllToCloud;
@@ -2384,6 +2498,7 @@ ${metricLines}`;
       const r = await pushNotebookToSupabase(supabaseCreds, syncKey, snapshot);
       const s = await pushUserSettingsToSupabase(supabaseCreds, syncKey, {
         activeWorkspaceId,
+        uiPreferences: { runtimeMode, lessonProgress },
       });
       if (r.needsSchema || s.needsSchema) {
         setSyncNeedsSchema(true);
@@ -2406,6 +2521,8 @@ ${metricLines}`;
     selectedExpId,
     syncKey,
     supabaseCreds,
+    runtimeMode,
+    lessonProgress,
   ]);
 
   // Listen for BYOK key vault edits and sync immediately to Supabase
@@ -2881,7 +2998,152 @@ ${metricLines}`;
         setRightTabOverride('predict');
       },
     },
+    {
+      id: 'open-learn',
+      label: 'Chuyển sang Giáo trình & Lab ML (108 bài)',
+      category: 'View',
+      onSelect: () => handleAppModeChange('learn'),
+    },
   ];
+
+  const handleAppModeChange = useCallback((mode: 'studio' | 'learn') => {
+    setAppMode(mode);
+    try {
+      const url = new URL(window.location.href);
+      if (mode === 'learn') {
+        url.searchParams.set('mode', 'learn');
+      } else {
+        url.searchParams.delete('mode');
+        url.searchParams.delete('lesson');
+      }
+      window.history.replaceState({}, '', url.toString());
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const handleOpenLearnNewTab = useCallback(() => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('mode', 'learn');
+      window.open(url.toString(), '_blank', 'noopener');
+    } catch {
+      window.open('?mode=learn', '_blank');
+    }
+  }, []);
+
+  const handleUpdateLessonProgress = useCallback(
+    (lessonId: string, patch: Partial<LessonProgressState>) => {
+      setLessonProgress((prev) => {
+        const cur = prev[lessonId] || { completed: false, attempts: 0 };
+        return {
+          ...prev,
+          [lessonId]: {
+            ...cur,
+            ...patch,
+          },
+        };
+      });
+    },
+    []
+  );
+
+  const executeAdhocPython = useCallback(
+    (code: string): Promise<AdhocPythonExecResult> => {
+      const cellId = `learn_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      return new Promise<AdhocPythonExecResult>((resolve) => {
+        adhocResolversRef.current.set(cellId, { logs: '', resolve });
+
+        if (runtimeModeRef.current === 'cloud') {
+          if (!cloudBrokerRef.current || !cloudConnected) {
+            adhocResolversRef.current.delete(cellId);
+            setIsCloudModalOpen(true);
+            resolve({
+              status: 'error',
+              durationMs: 0,
+              stdout: 'Chưa kết nối Colab/Kaggle Worker. Hãy kết nối Cloud hoặc chuyển sang Browser (Pyodide).',
+              figures: [],
+            });
+            return;
+          }
+          setCloudWorkerStatus('busy');
+          cloudBrokerRef.current
+            .sendRunCell({
+              id: cellId,
+              order: 0,
+              title: 'Curriculum Lab',
+              subtitle: '',
+              cellType: 'code',
+              stepType: 'custom',
+              currentCode: code,
+              generatedCode: code,
+              isLocked: false,
+              status: 'running',
+              outputText: '',
+              figures: [],
+            })
+            .catch((err) => {
+              adhocResolversRef.current.delete(cellId);
+              setCloudWorkerStatus('idle');
+              resolve({
+                status: 'error',
+                durationMs: 0,
+                stdout: `Cloud error: ${String(err)}`,
+                figures: [],
+              });
+            });
+        } else {
+          if (!pyodideWorkerRef.current) {
+            adhocResolversRef.current.delete(cellId);
+            resolve({
+              status: 'error',
+              durationMs: 0,
+              stdout: 'Pyodide Worker chưa sẵn sàng.',
+              figures: [],
+            });
+            return;
+          }
+          pyodideWorkerRef.current.postMessage({
+            type: 'run_cell',
+            payload: {
+              cellId,
+              executionId: cellId,
+              code,
+            },
+          });
+        }
+      });
+    },
+    [cloudConnected]
+  );
+
+  const handleLoadLessonDatasetIntoStudio = useCallback(
+    async (datasetId: string) => {
+      const ds = CURRICULUM_DATASETS[datasetId];
+      if (!ds) return;
+      const matCode = `${buildDatasetMaterializerPython([datasetId])}
+with open('${ds.fileName}', 'r', encoding='utf-8') as _f:
+    print('__LEARN_CSV_START__')
+    print(_f.read())
+    print('__LEARN_CSV_END__')`;
+      const res = await executeAdhocPython(matCode);
+      const sIdx = res.stdout.indexOf('__LEARN_CSV_START__');
+      const eIdx = res.stdout.indexOf('__LEARN_CSV_END__');
+      if (sIdx !== -1 && eIdx !== -1 && eIdx > sIdx) {
+        const csvContent = res.stdout
+          .slice(sIdx + '__LEARN_CSV_START__'.length, eIdx)
+          .trim();
+        const file = new File([csvContent], ds.fileName, { type: 'text/csv' });
+        handleAppModeChange('studio');
+        await processTrainCsvFile(file);
+      }
+    },
+    [executeAdhocPython, handleAppModeChange, processTrainCsvFile]
+  );
+
+  const completedLessonsCount = Object.values(lessonProgress).filter(
+    (p) => p.completed
+  ).length;
 
   return (
     <div className="h-screen w-screen overflow-hidden flex flex-col bg-[#18191a] text-[#e8eaed]">
@@ -2916,6 +3178,11 @@ ${metricLines}`;
       />
 
       <TopNavbar
+        appMode={appMode}
+        onAppModeChange={handleAppModeChange}
+        onOpenLearnNewTab={handleOpenLearnNewTab}
+        completedLessonsCount={completedLessonsCount}
+        totalLessonsCount={ALL_LESSONS.length}
         projectName={projectName}
         onProjectNameChange={setProjectName}
         runtimeMode={runtimeMode}
@@ -2961,6 +3228,19 @@ ${metricLines}`;
         onOpenCommandPalette={() => setIsCmdPaletteOpen(true)}
       />
 
+      {appMode === 'learn' ? (
+        <LearningCenterView
+          runtimeMode={runtimeMode}
+          pyodideStatus={pyodideStatus}
+          cloudConnected={cloudConnected}
+          lessonProgress={lessonProgress}
+          initialLessonId={initialLessonId}
+          onUpdateLessonProgress={handleUpdateLessonProgress}
+          onExecutePython={executeAdhocPython}
+          onLoadDatasetIntoStudio={handleLoadLessonDatasetIntoStudio}
+        />
+      ) : (
+        <>
       <div className="flex-1 flex overflow-hidden relative">
         {/* Compact (half-screen / tablet) backdrop when an overlay drawer is open */}
         {viewportMode === 'compact' && (showLeftPanel || showRightPanel) && (
@@ -3135,6 +3415,8 @@ ${metricLines}`;
           </span>
         </button>
       </nav>
+        </>
+      )}
 
       {/* Bottom Status Bar (tablet/desktop) */}
       <footer className="hidden md:flex h-6 px-3 bg-[#202124] border-t border-[#3c4043] items-center justify-between text-[11px] text-[#9aa0a6] select-none shrink-0 font-mono">

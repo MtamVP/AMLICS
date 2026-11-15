@@ -229,6 +229,7 @@ export async function pullAllFromSupabase(
   notebooks: CloudWorkspaceSnapshot[];
   activeWorkspaceId: string | null;
   byokState: StoredByokState | null;
+  uiPreferences: Record<string, unknown> | null;
   settingsUpdatedAt: number;
 }> {
   const client = getClient(creds);
@@ -239,6 +240,7 @@ export async function pullAllFromSupabase(
       notebooks: [],
       activeWorkspaceId: null,
       byokState: null,
+      uiPreferences: null,
       settingsUpdatedAt: 0,
     };
   }
@@ -265,6 +267,7 @@ export async function pullAllFromSupabase(
         notebooks: [],
         activeWorkspaceId: null,
         byokState: null,
+        uiPreferences: null,
         settingsUpdatedAt: 0,
       };
     }
@@ -276,6 +279,7 @@ export async function pullAllFromSupabase(
         notebooks: [],
         activeWorkspaceId: null,
         byokState: null,
+        uiPreferences: null,
         settingsUpdatedAt: 0,
       };
     }
@@ -309,6 +313,10 @@ export async function pullAllFromSupabase(
         settingsRow?.byok_state && Object.keys(settingsRow.byok_state).length > 0
           ? (settingsRow.byok_state as StoredByokState)
           : null,
+      uiPreferences:
+        settingsRow?.ui_preferences && Object.keys(settingsRow.ui_preferences).length > 0
+          ? (settingsRow.ui_preferences as Record<string, unknown>)
+          : null,
       settingsUpdatedAt,
     };
   } catch (err) {
@@ -318,6 +326,7 @@ export async function pullAllFromSupabase(
       notebooks: [],
       activeWorkspaceId: null,
       byokState: null,
+      uiPreferences: null,
       settingsUpdatedAt: 0,
     };
   }

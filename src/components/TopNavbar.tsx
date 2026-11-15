@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  BookOpen,
   ChevronDown,
+  ExternalLink,
   PanelLeft,
   PanelRight,
   Play,
@@ -18,6 +20,11 @@ import {
 } from '../types/studio';
 
 interface TopNavbarProps {
+  appMode: 'studio' | 'learn';
+  onAppModeChange: (mode: 'studio' | 'learn') => void;
+  onOpenLearnNewTab: () => void;
+  completedLessonsCount: number;
+  totalLessonsCount: number;
   projectName: string;
   onProjectNameChange: (name: string) => void;
   runtimeMode: RuntimeMode;
@@ -60,6 +67,11 @@ interface TopNavbarProps {
 }
 
 export const TopNavbar: React.FC<TopNavbarProps> = ({
+  appMode,
+  onAppModeChange,
+  onOpenLearnNewTab,
+  completedLessonsCount,
+  totalLessonsCount,
   projectName,
   onProjectNameChange,
   runtimeMode,
@@ -129,13 +141,61 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
 
   return (
     <header className="h-11 px-2 sm:px-3 bg-[#202124] border-b border-[#3c4043] flex items-center justify-between gap-2 select-none shrink-0 relative z-30">
-      {/* Left: Brand, Notebook Filename & Menu Actions */}
+      {/* Left: Brand, Mode Switcher, Notebook Filename & Menu Actions */}
       <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
         <div className="flex items-center gap-1 sm:gap-2 min-w-0">
           <span className="font-mono font-bold text-xs px-1.5 py-0.5 rounded bg-[#303134] text-[#e8eaed] border border-[#3c4043] tracking-tight shrink-0">
             AMLICS
           </span>
-          <div ref={wsMenuRef} className="relative flex items-center shrink-0">
+
+          {/* Mode Switch: Studio Pipeline <-> Giáo trình ML 108 bài */}
+          <div className="flex items-center bg-[#18191a] p-0.5 rounded border border-[#3c4043] shrink-0">
+            <button
+              type="button"
+              onClick={() => onAppModeChange('studio')}
+              className={`px-2 py-0.5 rounded-sm text-[11px] font-medium transition-colors whitespace-nowrap ${
+                appMode === 'studio'
+                  ? 'bg-[#303134] text-[#e8eaed]'
+                  : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+              }`}
+            >
+              Studio
+            </button>
+            <button
+              type="button"
+              onClick={() => onAppModeChange('learn')}
+              className={`flex items-center gap-1 px-2 py-0.5 rounded-sm text-[11px] font-medium transition-colors whitespace-nowrap ${
+                appMode === 'learn'
+                  ? 'bg-[#81c995]/20 text-[#81c995]'
+                  : 'text-[#9aa0a6] hover:text-[#81c995]'
+              }`}
+              title="Mở hệ thống 108 bài giảng & thực hành Machine Learning từ A-Z"
+            >
+              <BookOpen className="w-3 h-3 shrink-0" />
+              <span>Học ML ({totalLessonsCount})</span>
+            </button>
+            <button
+              type="button"
+              onClick={onOpenLearnNewTab}
+              title="Mở Giáo trình & Lab Thực hành ML sang tab trình duyệt mới"
+              className="px-1.5 py-0.5 text-[#9aa0a6] hover:text-[#8ab4f8] border-l border-[#3c4043] ml-0.5 transition-colors"
+              aria-label="Mở tab học ML mới"
+            >
+              <ExternalLink className="w-3 h-3" />
+            </button>
+          </div>
+
+          {appMode === 'learn' ? (
+            <div className="hidden md:flex items-center gap-2 pl-2 text-xs text-[#9aa0a6] min-w-0">
+              <span className="truncate font-medium text-[#d2d6dc]">
+                Giáo trình ML &amp; Kaggle Lab (A–Z)
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-[#292a2d] border border-[#3c4043] font-mono text-[10px] text-[#81c995] shrink-0">
+                {completedLessonsCount}/{totalLessonsCount} đã đạt
+              </span>
+            </div>
+          ) : (
+            <div ref={wsMenuRef} className="relative flex items-center shrink-0">
             <input
               type="text"
               value={projectName}
@@ -211,11 +271,14 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
               </div>
             )}
           </div>
+          )}
         </div>
 
-        <div className="hidden sm:block h-4 w-[1px] bg-[#3c4043] shrink-0" />
+        {appMode === 'studio' && (
+          <>
+            <div className="hidden sm:block h-4 w-[1px] bg-[#3c4043] shrink-0" />
 
-        <div className="flex items-center gap-1 shrink-0">
+            <div className="flex items-center gap-1 shrink-0">
           {isExecuting ? (
             <button
               type="button"
@@ -427,56 +490,62 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
             </button>
           )}
         </div>
+          </>
+        )}
       </div>
 
       {/* Right: Command Palette, AI BYOK, Panel Toggles, Runtime Selector & Resource Pill */}
       <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
-        <button
-          type="button"
-          onClick={onOpenCommandPalette}
-          title="Command Palette (Ctrl+K)"
-          className="hidden lg:inline-flex px-2 py-1 rounded text-[11px] font-mono bg-[#18191a] hover:bg-[#303134] text-[#9aa0a6] hover:text-[#e8eaed] border border-[#3c4043] transition-colors cursor-pointer whitespace-nowrap"
-        >
-          Ctrl+K
-        </button>
+        {appMode === 'studio' && (
+          <>
+            <button
+              type="button"
+              onClick={onOpenCommandPalette}
+              title="Command Palette (Ctrl+K)"
+              className="hidden lg:inline-flex px-2 py-1 rounded text-[11px] font-mono bg-[#18191a] hover:bg-[#303134] text-[#9aa0a6] hover:text-[#e8eaed] border border-[#3c4043] transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Ctrl+K
+            </button>
 
-        <button
-          type="button"
-          onClick={onOpenAiModal}
-          title="AMLICS Plugin AI — Cắm API Key từ nhiều AI (Gemini, OpenAI...) để Auto-Optimize & sinh code"
-          className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-[#303134] hover:bg-[#3c4043] text-[#8ab4f8] border border-[#8ab4f8]/40 transition-colors cursor-pointer whitespace-nowrap"
-        >
-          <Sparkles className="w-3.5 h-3.5 shrink-0" />
-          <span className="hidden sm:inline">Plugin AI</span>
-          <span className="hidden 2xl:inline">(BYOK)</span>
-        </button>
+            <button
+              type="button"
+              onClick={onOpenAiModal}
+              title="AMLICS Plugin AI — Cắm API Key từ nhiều AI (Gemini, OpenAI...) để Auto-Optimize & sinh code"
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-[#303134] hover:bg-[#3c4043] text-[#8ab4f8] border border-[#8ab4f8]/40 transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Sparkles className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">Plugin AI</span>
+              <span className="hidden 2xl:inline">(BYOK)</span>
+            </button>
 
-        <div className="hidden md:flex items-center bg-[#18191a] p-0.5 rounded border border-[#3c4043]">
-          <button
-            type="button"
-            onClick={onToggleLeftPanel}
-            title={showLeftPanel ? 'Ẩn cột Pipeline Configuration' : 'Mở cột Pipeline Configuration'}
-            className={`p-1 rounded-sm transition-colors ${
-              showLeftPanel
-                ? 'bg-[#303134] text-[#8ab4f8]'
-                : 'text-[#9aa0a6] hover:text-[#e8eaed]'
-            }`}
-          >
-            <PanelLeft className="w-3.5 h-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={onToggleRightPanel}
-            title={showRightPanel ? 'Ẩn cột Leaderboard & Console' : 'Mở cột Leaderboard & Console'}
-            className={`p-1 rounded-sm transition-colors ${
-              showRightPanel
-                ? 'bg-[#303134] text-[#8ab4f8]'
-                : 'text-[#9aa0a6] hover:text-[#e8eaed]'
-            }`}
-          >
-            <PanelRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
+            <div className="hidden md:flex items-center bg-[#18191a] p-0.5 rounded border border-[#3c4043]">
+              <button
+                type="button"
+                onClick={onToggleLeftPanel}
+                title={showLeftPanel ? 'Ẩn cột Pipeline Configuration' : 'Mở cột Pipeline Configuration'}
+                className={`p-1 rounded-sm transition-colors ${
+                  showLeftPanel
+                    ? 'bg-[#303134] text-[#8ab4f8]'
+                    : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+                }`}
+              >
+                <PanelLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={onToggleRightPanel}
+                title={showRightPanel ? 'Ẩn cột Leaderboard & Console' : 'Mở cột Leaderboard & Console'}
+                className={`p-1 rounded-sm transition-colors ${
+                  showRightPanel
+                    ? 'bg-[#303134] text-[#8ab4f8]'
+                    : 'text-[#9aa0a6] hover:text-[#e8eaed]'
+                }`}
+              >
+                <PanelRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </>
+        )}
 
         <div className="flex items-center bg-[#18191a] p-0.5 rounded border border-[#3c4043] text-xs">
           <button
