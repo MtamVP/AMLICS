@@ -436,14 +436,14 @@ clf.fit(X_train, y_train)
   }
 });
 
-test('curriculum defines 108 unique lessons across 12 tracks with valid datasets and sections', () => {
+test('curriculum defines 135+ unique lessons across 14 tracks with valid datasets and sections', () => {
   const curriculumMod = bundleAndLoad('src/data/curriculum/index.ts');
   const dsMod = bundleAndLoad('src/data/curriculumDatasets.ts');
 
   const tracks = curriculumMod.CURRICULUM_TRACKS;
   const lessons = curriculumMod.ALL_LESSONS;
-  assert.equal(tracks.length, 12, 'expected 12 curriculum tracks');
-  assert.equal(lessons.length, 108, 'expected 108 lessons total (>100)');
+  assert.equal(tracks.length, 14, 'expected 14 curriculum tracks');
+  assert.ok(lessons.length >= 135, `expected >= 135 lessons total, got ${lessons.length}`);
 
   const trackIds = new Set(tracks.map((t) => t.id));
   const seenIds = new Set();
@@ -468,7 +468,7 @@ test('curriculum defines 108 unique lessons across 12 tracks with valid datasets
   }
 });
 
-test('all 108 curriculum lessons solutionCode pass q1.check() auto-grader in real Python', () => {
+test('all 135+ curriculum lessons solutionCode pass q1.check() auto-grader in real Python', () => {
   const curriculumMod = bundleAndLoad('src/data/curriculum/index.ts');
   const graderMod = bundleAndLoad('src/engine/curriculumGrader.ts');
   const lessons = curriculumMod.ALL_LESSONS;
@@ -522,9 +522,9 @@ assert len(failures) == 0, f"{len(failures)} lessons failed: " + json.dumps([{"i
 `;
     const pyFile = path.join(tmpDir, 'run_all_108.py');
     fs.writeFileSync(pyFile, runnerPy, 'utf8');
-    const out = execFileSync('python', [pyFile], { encoding: 'utf8', timeout: 180000 });
+    const out = execFileSync('python', [pyFile], { encoding: 'utf8', timeout: 360000 });
     const summary = JSON.parse(out.trim().split('\n').pop());
-    assert.equal(summary.total, 108);
+    assert.equal(summary.total, lessons.length);
     assert.deepEqual(summary.failures, []);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });

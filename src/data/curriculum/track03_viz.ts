@@ -2,6 +2,90 @@ import { LessonDefinition } from '../../types/curriculum';
 
 export const TRACK03_VIZ_LESSONS: LessonDefinition[] = [
   {
+    id: 'V001',
+    order: 23,
+    trackId: 'track03_viz',
+    title: 'Matplotlib Từ Con Số 0: Vẽ Line/Bar Đầu Tiên, Style, Chú Thích & Xuất Ảnh',
+    subtitle: 'Hướng dẫn từng dòng cho người mới: màu sắc, linestyle, marker, grid, annotate và savefig(dpi=300)',
+    difficulty: 'Cơ bản',
+    libraries: ['Matplotlib', 'Pandas'],
+    estimatedMinutes: 20,
+    datasetIds: ['housing'],
+    objectives: [
+      'Nắm vững quy trình 5 bước chuẩn khi vẽ bất kỳ biểu đồ Matplotlib nào.',
+      'Chỉnh màu (`color`), kiểu nét (`linestyle="--"`), điểm đánh dấu (`marker="o"`), lưới (`ax.grid`) và nhãn dữ liệu.',
+      'Dùng `ax.annotate()` chỉ mũi tên vào điểm nổi bật và xuất ảnh sắc nét bằng `fig.savefig(..., dpi=300)`.',
+    ],
+    sections: [
+      {
+        title: '1. Công thức 5 bước vẽ mọi biểu đồ Matplotlib cho người mới',
+        contentMarkdown:
+          'Mọi biểu đồ Matplotlib chuyên nghiệp đều đi theo đúng 5 dòng khung xương:\n1. **Chuẩn bị giấy vẽ:** `fig, ax = plt.subplots(figsize=(8, 4))`\n2. **Vẽ dữ liệu lên `ax`:** `ax.bar(...)`, `ax.plot(...)`, hoặc `ax.scatter(...)`\n3. **Đặt nhãn rõ ràng:** `ax.set_title(...)`, `ax.set_xlabel(...)`, `ax.set_ylabel(...)`\n4. **Trang trí dễ đọc:** `ax.grid(True, linestyle="--", alpha=0.4)` và `ax.legend()`\n5. **Căn lề không cắt chữ:** `plt.tight_layout()`\n\n| Tham số trang trí | Giá trị hay dùng | Tác dụng |\n| :--- | :--- | :--- |\n| `color` | `"#2563eb"`, `"tomato"`, `"teal"` | Đổi màu cột/đường theo bảng màu hex hoặc tên chuẩn |\n| `alpha` | `0.2` – `0.9` | Độ trong suốt (rất hữu ích khi nhiều điểm đè lên nhau) |\n| `linestyle` | `"-"`, `"--"`, `":"` | Nét liền, nét đứt, nét chấm |\n| `marker` | `"o"`, `"s"`, `"^"` | Chấm tròn, hình vuông, tam giác tại từng điểm dữ liệu |',
+        exampleCode: `import matplotlib.pyplot as plt
+import pandas as pd
+
+df = pd.read_csv('housing.csv')
+counts = df['Bedrooms'].value_counts().sort_index()
+
+fig, ax = plt.subplots(figsize=(7, 4))
+bars = ax.bar(counts.index.astype(str), counts.values, color='#3b82f6', edgecolor='#1e3a8a')
+ax.set_title('Số lượng căn nhà theo số phòng ngủ')
+ax.set_xlabel('Số phòng ngủ (Bedrooms)')
+ax.set_ylabel('Số lượng căn')
+ax.grid(axis='y', linestyle='--', alpha=0.4)
+for bar, val in zip(bars, counts.values):
+    ax.text(bar.get_x() + bar.get_width()/2, val + 2, str(val), ha='center', fontsize=9)
+plt.tight_layout()`,
+      },
+      {
+        title: '2. Làm nổi bật điểm quan trọng bằng ax.annotate() & Xuất file DPI cao',
+        contentMarkdown:
+          'Để thuyết trình báo cáo hoặc lưu ảnh vào slide, dùng:\n- `ax.annotate("Đỉnh cao nhất", xy=(x, y), xytext=(x+0.5, y+10), arrowprops=dict(arrowstyle="->"))`\n- `fig.savefig("chart.png", dpi=300, bbox_inches="tight")`: `bbox_inches="tight"` giúp **không bao giờ bị cắt mất tiêu đề hoặc nhãn trục**. ',
+      },
+    ],
+    exercise: {
+      prompt:
+        'Từ `housing.csv`, tính giá nhà trung bình `mean_price_by_bed` theo từng số lượng `Bedrooms` (sắp tăng dần theo `Bedrooms`), vẽ biểu đồ cột `ax.bar(...)`, đặt tiêu đề, bật grid trục Y và lưu `fig.savefig("housing_bedrooms.png", dpi=150, bbox_inches="tight")`.',
+      requirements: [
+        '`mean_price_by_bed` là Series có index sắp tăng dần theo `Bedrooms`.',
+        'Vẽ lên `ax` đủ số cột bằng `len(mean_price_by_bed)` với tiêu đề & nhãn trục Y khác rỗng.',
+        'Xuất thành công file `"housing_bedrooms.png"` ra đĩa.',
+      ],
+      starterCode: `import os
+import matplotlib.pyplot as plt
+df = pd.read_csv('housing.csv')
+mean_price_by_bed = df.groupby('Bedrooms')['SalePrice'].mean().sort_index()
+
+fig, ax = plt.subplots(figsize=(7, 4))
+# TODO: Vẽ ax.bar(...), thêm grid, title, xlabel, ylabel rồi savefig('housing_bedrooms.png')
+
+plt.tight_layout()
+`,
+      hintText:
+        '`ax.bar(mean_price_by_bed.index.astype(str), mean_price_by_bed.values, color="#0ea5e9")`, đặt `set_title`, `set_ylabel`, `ax.grid(axis="y", alpha=0.4)`, rồi `fig.savefig("housing_bedrooms.png", dpi=150, bbox_inches="tight")`.',
+      solutionCode: `import os
+import matplotlib.pyplot as plt
+df = pd.read_csv('housing.csv')
+mean_price_by_bed = df.groupby('Bedrooms')['SalePrice'].mean().sort_index()
+
+fig, ax = plt.subplots(figsize=(7, 4))
+ax.bar(mean_price_by_bed.index.astype(str), mean_price_by_bed.values, color='#0ea5e9')
+ax.set_title('Giá nhà trung bình theo Số phòng ngủ')
+ax.set_xlabel('Bedrooms')
+ax.set_ylabel('Mean SalePrice')
+ax.grid(axis='y', linestyle='--', alpha=0.4)
+plt.tight_layout()
+fig.savefig('housing_bedrooms.png', dpi=150, bbox_inches='tight')
+`,
+      checkPython: `import os
+exp = df.groupby('Bedrooms')['SalePrice'].mean().sort_index()
+assert list(mean_price_by_bed.index) == list(exp.index)
+assert len(ax.patches) == len(exp)
+assert bool(ax.get_title().strip()) and bool(ax.get_ylabel().strip())
+assert os.path.exists('housing_bedrooms.png')`,
+    },
+  },
+  {
     id: 'L023',
     order: 23,
     trackId: 'track03_viz',
@@ -571,6 +655,253 @@ plt.tight_layout()
       checkPython: `assert isinstance(used_seaborn, bool), "used_seaborn phải là bool."
 assert len(ax.collections) >= 1, "Axes chưa có điểm dữ liệu scatter."
 assert ax.get_legend() is not None, "Biểu đồ cần có legend phân biệt Sex."`,
+    },
+  },
+  {
+    id: 'V002',
+    order: 31,
+    trackId: 'track03_viz',
+    title: 'Seaborn Cho Người Mới: histplot, kdeplot, countplot & Phân Nhóm hue',
+    subtitle: 'Vẽ biểu đồ phân phối và đếm hạng mục đẹp chuẩn báo cáo chỉ bằng 1 dòng code Seaborn',
+    difficulty: 'Cơ bản',
+    libraries: ['Seaborn', 'Matplotlib', 'Pandas'],
+    estimatedMinutes: 22,
+    datasetIds: ['churn', 'titanic'],
+    objectives: [
+      'Phân biệt `sns.countplot` (dùng cho cột chữ/rời rạc) vs `sns.histplot` + `kde=True` (dùng cho cột số liên tục).',
+      'Sử dụng tham số `hue=` để tách đôi phân phối giữa 2 lớp mục tiêu (`Churn=0` vs `Churn=1`).',
+      'Hiểu `stat="density"` và `common_norm=False` khi so sánh hai nhóm lệch kích thước.',
+    ],
+    sections: [
+      {
+        title: '1. Ba hàm Seaborn nền tảng phải thuộc khi mới mở file CSV',
+        contentMarkdown:
+          'Seaborn sinh ra để vẽ nhanh trên **DataFrame Pandas** (`data=df, x="ten_cot", hue="target"`). Thay vì tự viết vòng lặp `groupby` rồi vẽ tay trong Matplotlib, Seaborn tự tô màu, tự dựng Legend và ước lượng đường cong mật độ KDE!\n\n| Hàm Seaborn | Dùng cho loại cột nào? | Tham số quan trọng |\n| :--- | :--- | :--- |\n| `sns.countplot(data=df, x="Country", hue="Churn")` | Cột **phân loại / chữ** | `order=...`, `palette="Set2"` |\n| `sns.histplot(data=df, x="Age", hue="Churn", kde=True)` | Cột **số liên tục** | `bins=25`, `kde=True`, `common_norm=False` |\n| `sns.kdeplot(data=df, x="Age", hue="Churn", fill=True)` | Đường cong mật độ mượt | `fill=True`, `alpha=0.35` |',
+        exampleCode: `import matplotlib.pyplot as plt
+df = pd.read_csv('bank_churn.csv')
+fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+try:
+    import seaborn as sns
+    sns.countplot(data=df, x='Country', hue='Churn', ax=axes[0])
+    sns.histplot(data=df, x='Age', hue='Churn', kde=True, bins=20, ax=axes[1])
+except ImportError:
+    axes[0].bar(df['Country'].value_counts().index, df['Country'].value_counts().values)
+    axes[1].hist(df['Age'], bins=20)
+axes[0].set_title('Khách hàng theo Quốc gia & Churn')
+axes[1].set_title('Phân bố Tuổi theo Churn')
+plt.tight_layout()`,
+      },
+      {
+        title: '2. Bí quyết `common_norm=False` khi lớp mất cân bằng',
+        contentMarkdown:
+          'Trong `bank_churn.csv`, nhóm `Churn=0` đông gấp ~3.5 lần `Churn=1`. Nếu không tách chuẩn hóa riêng (`common_norm=False, stat="density"`), đường cong của nhóm ít (`Churn=1`) bị ép bẹp sát đáy khiến bạn tưởng hai nhóm giống nhau!',
+      },
+    ],
+    exercise: {
+      prompt:
+        'Trên `bank_churn.csv`, vẽ 2 biểu đồ cạnh nhau (`fig, axes = plt.subplots(1, 2, figsize=(11, 4))`): bên trái vẽ phân bố cột `Country` tách theo `Churn` (`countplot` nếu có seaborn, hoặc barh fallback), bên phải vẽ phân bố `Age` theo 2 lớp `Churn=0` và `Churn=1` (`histplot(..., kde=True)` nếu có seaborn, hoặc 2 `ax.hist` có `alpha=0.5`). Tính `churn_rate_by_country` dạng dict `{country: rate}`.',
+      requirements: [
+        '`axes` có đúng 2 biểu đồ, mỗi biểu đồ có `set_title` không rỗng.',
+        '`churn_rate_by_country` khớp tỷ lệ `Churn.mean()` từng quốc gia.',
+      ],
+      starterCode: `import matplotlib.pyplot as plt
+df = pd.read_csv('bank_churn.csv')
+churn_rate_by_country = {}
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+# TODO: Vẽ bên trái (Country vs Churn), bên phải (Age theo Churn), và tính churn_rate_by_country
+
+plt.tight_layout()
+`,
+      hintText:
+        '`churn_rate_by_country = {str(k): float(v) for k, v in df.groupby("Country")["Churn"].mean().items()}`. Trong `try: import seaborn as sns` dùng `sns.countplot` và `sns.histplot`.',
+      solutionCode: `import matplotlib.pyplot as plt
+df = pd.read_csv('bank_churn.csv')
+churn_rate_by_country = {str(k): float(v) for k, v in df.groupby('Country')['Churn'].mean().items()}
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+try:
+    import seaborn as sns
+    sns.countplot(data=df, x='Country', hue='Churn', ax=axes[0])
+    sns.histplot(data=df, x='Age', hue='Churn', bins=20, kde=True, stat='density', common_norm=False, ax=axes[1])
+except ImportError:
+    countries = sorted(df['Country'].unique())
+    rates = [churn_rate_by_country[c] for c in countries]
+    axes[0].bar(countries, rates, color='#3b82f6')
+    for ch, grp in df.groupby('Churn'):
+        axes[1].hist(grp['Age'], bins=20, density=True, alpha=0.5, label=f'Churn={ch}')
+    axes[1].legend()
+
+axes[0].set_title('Phân bố Country theo Churn')
+axes[1].set_title('Phân bố Age theo Churn')
+plt.tight_layout()
+`,
+      checkPython: `exp = {str(k): float(v) for k, v in df.groupby('Country')['Churn'].mean().items()}
+assert set(churn_rate_by_country.keys()) == set(exp.keys())
+for k in exp:
+    assert abs(float(churn_rate_by_country[k]) - exp[k]) < 1e-6
+assert len(axes) == 2 and bool(axes[0].get_title().strip()) and bool(axes[1].get_title().strip())`,
+    },
+  },
+  {
+    id: 'V003',
+    order: 32,
+    trackId: 'track03_viz',
+    title: 'Seaborn Chuyên Sâu: Boxplot vs Violinplot, Stripplot & Bảng Màu Palette',
+    subtitle: 'Khi nào Boxplot tốt hơn Histogram và cách đọc Violinplot không bị đánh lừa bởi outlier',
+    difficulty: 'Trung bình',
+    libraries: ['Seaborn', 'Matplotlib', 'Pandas'],
+    estimatedMinutes: 22,
+    datasetIds: ['iris_ext'],
+    objectives: [
+      'Đọc thành thạo 5 đường trên Boxplot (Min whisker, Q1, Median, Q3, Max whisker & điểm Outlier).',
+      'Kết hợp Violinplot (cho thấy đa đỉnh bimodal) và Stripplot/Swarmplot để nhìn thấy từng điểm thực.',
+      'Chọn đúng palette màu cho dữ liệu phân loại (`Set2`, `tab10`) vs dữ liệu thứ bậc/liên tục (`viridis`, `coolwarm`).',
+    ],
+    sections: [
+      {
+        title: '1. So sánh Boxplot, Violinplot và Swarm/Stripplot',
+        contentMarkdown:
+          '- **Boxplot** rất gọn để so 5–10 nhóm cùng lúc, nhưng **che giấu phân phối 2 đỉnh (bimodal)**: 2 nhóm có trung vị y hệt nhau nhưng hình dạng hoàn toàn khác nhau!\n- **Violinplot** ghép thêm đường KDE hai bên hộp, giúp nhìn ra ngay phân phối lệch hay 2 đỉnh.\n- **Palette trong Seaborn:**\n  - Nhãn rời rạc không thứ tự (`Species`, `Country`): `palette="Set2"`, `"pastel"`, `"tab10"`.\n  - Giá trị từ thấp lên cao (như Correlation, Giá nhà): `cmap="coolwarm"` hoặc `"viridis"`.',
+        callout: {
+          type: 'tip',
+          title: 'Quy tắc chồng 2 lớp Seaborn cực đẹp',
+          text: 'Vẽ `sns.boxplot(..., showfliers=False, color="lightgray", ax=ax)` ở dưới rồi vẽ đè `sns.stripplot(..., size=3, alpha=0.5, ax=ax)` ở trên — vừa thấy IQR vừa thấy mật độ điểm thật!',
+        },
+      },
+    ],
+    exercise: {
+      prompt:
+        'Trên `iris_extended.csv`, vẽ so sánh phân bố `PetalLength` giữa 3 loài `Species` bằng `sns.violinplot` (hoặc `ax.violinplot` / `ax.boxplot` fallback) kèm tính chiều dài trung bình & độ lệch chuẩn từng loài vào `species_stats` dạng `{species: {"mean": ..., "std": ...}}`.',
+      requirements: [
+        '`species_stats` có đủ 3 khóa tên loài trong `iris_extended.csv` với giá trị `mean` và `std` chính xác.',
+        'Biểu đồ có tiêu đề và nhãn trục Y rõ ràng.',
+      ],
+      starterCode: `import matplotlib.pyplot as plt
+df = pd.read_csv('iris_extended.csv')
+species_stats = {}
+
+fig, ax = plt.subplots(figsize=(7, 4))
+# TODO: Tính species_stats và vẽ violinplot (hoặc fallback boxplot) cho PetalLength theo Species
+
+plt.tight_layout()
+`,
+      hintText:
+        '`for sp, g in df.groupby("Species"): species_stats[str(sp)] = {"mean": float(g["PetalLength"].mean()), "std": float(g["PetalLength"].std())}`.',
+      solutionCode: `import matplotlib.pyplot as plt
+df = pd.read_csv('iris_extended.csv')
+species_stats = {
+    str(sp): {
+        'mean': float(g['PetalLength'].mean()),
+        'std': float(g['PetalLength'].std()),
+    }
+    for sp, g in df.groupby('Species')
+}
+
+fig, ax = plt.subplots(figsize=(7, 4))
+try:
+    import seaborn as sns
+    sns.violinplot(data=df, x='Species', y='PetalLength', hue='Species', legend=False, palette='Set2', ax=ax)
+except ImportError:
+    order_sp = sorted(species_stats.keys())
+    ax.boxplot([df.loc[df['Species'] == s, 'PetalLength'] for s in order_sp], patch_artist=True)
+    ax.set_xticks(range(1, len(order_sp) + 1), order_sp)
+
+ax.set_title('Phân bố PetalLength theo Species (Violin/Box)')
+ax.set_ylabel('PetalLength (cm)')
+plt.tight_layout()
+`,
+      checkPython: `assert set(species_stats.keys()) == set(df['Species'].unique())
+for sp in species_stats:
+    exp_m = float(df.loc[df['Species'] == sp, 'PetalLength'].mean())
+    assert abs(species_stats[sp]['mean'] - exp_m) < 1e-5
+assert bool(ax.get_title().strip()) and bool(ax.get_ylabel().strip())`,
+    },
+  },
+  {
+    id: 'V004',
+    order: 33,
+    trackId: 'track03_viz',
+    title: 'Plotly Chuyên Sâu: px.scatter, hover_data, facet_col & Cấu Trúc JSON',
+    subtitle: 'Làm chủ đồ thị web tương tác đa chiều bằng plotly.express và plotly.graph_objects',
+    difficulty: 'Trung bình',
+    libraries: ['Plotly', 'Pandas'],
+    estimatedMinutes: 25,
+    datasetIds: ['housing'],
+    objectives: [
+      'Dùng `px.scatter(..., color=..., size=..., hover_data=...)` mã hóa tới 5 chiều thông tin trên 1 biểu đồ.',
+      'Chia cột nhỏ tự động theo hạng mục bằng `facet_col="HasGarage"` hoặc `facet_col_wrap=2`.',
+      'Hiểu bản chất mỗi đối tượng Plotly Figure thực chất là một JSON gồm 2 khóa `data` (traces) và `layout`.',
+    ],
+    sections: [
+      {
+        title: '1. Mã hóa đa chiều với Plotly Express',
+        contentMarkdown:
+          'Chỉ với một lệnh `px.scatter(...)`, bạn có thể đưa tới 5 thông tin lên cùng màn hình mà không bị rối, vì người xem có thể **rê chuột (`hover_data`)**, **bật/tắt từng nhóm ở Legend**, và **zoom từng khu vực**:\n- `x="LivingArea"`, `y="SalePrice"`\n- `color="Neighborhood"` (màu theo khu vực)\n- `size="Bedrooms"` (độ to hình tròn theo số phòng ngủ)\n- `hover_data=["HouseId", "YearBuilt", "DistCenterKm"]` (hiện thông tin chi tiết khi rê chuột)\n- `facet_col="HasGarage"` (tự tách 2 biểu đồ song song có Garage vs không Garage!)',
+        exampleCode: `# Nếu môi trường đã cài plotly:
+# import plotly.express as px
+# fig = px.scatter(
+#     df, x="LivingArea", y="SalePrice", color="Neighborhood",
+#     size="Bedrooms", hover_data=["YearBuilt", "DistCenterKm"],
+#     title="LivingArea vs SalePrice theo Khu vực"
+# )
+# spec = fig.to_plotly_json()
+print("Plotly JSON luôn có 2 khóa chuẩn: 'data' (danh sách trace) và 'layout' (tiêu đề, trục)")`,
+      },
+    ],
+    exercise: {
+      prompt:
+        'Chuẩn bị đặc tả Plotly JSON `scatter_spec` vẽ `LivingArea` (trục X) vs `SalePrice` (trục Y) phân tách trace theo từng `Neighborhood` từ `housing.csv` (dùng `px.scatter(...).to_plotly_json()` nếu cài `plotly`, hoặc tự dựng dict `{"data": [...], "layout": {...}}` mỗi Neighborhood 1 trace `"type": "scatter"`, `"mode": "markers"`). Đồng thời vẽ Matplotlib fallback để quan sát ngay.',
+      requirements: [
+        '`scatter_spec` là dict chứa `"data"` (số trace bằng số `Neighborhood` trong `housing.csv`) và `"layout"`.',
+        'Mỗi trace có đủ `"x"`, `"y"`, `"name"`.',
+      ],
+      starterCode: `import matplotlib.pyplot as plt
+df = pd.read_csv('housing.csv').dropna(subset=['LivingArea', 'SalePrice', 'Neighborhood'])
+scatter_spec = {}
+
+# TODO: Tạo scatter_spec chuẩn Plotly JSON theo từng Neighborhood và vẽ Matplotlib preview
+fig, ax = plt.subplots(figsize=(7, 4))
+plt.tight_layout()
+`,
+      hintText:
+        'Trong `try: import plotly.express as px`, tạo `pfig = px.scatter(df, x="LivingArea", y="SalePrice", color="Neighborhood", hover_data=["YearBuilt", "Bedrooms"])`, `scatter_spec = pfig.to_plotly_json()`. Trong `except ImportError`, duyệt `for nb, g in df.groupby("Neighborhood")` tạo dict `{"type": "scatter", "mode": "markers", "name": str(nb), "x": g["LivingArea"].tolist(), "y": g["SalePrice"].tolist()}`.',
+      solutionCode: `import matplotlib.pyplot as plt
+df = pd.read_csv('housing.csv').dropna(subset=['LivingArea', 'SalePrice', 'Neighborhood'])
+
+try:
+    import plotly.express as px
+    pfig = px.scatter(
+        df, x='LivingArea', y='SalePrice', color='Neighborhood',
+        hover_data=['Bedrooms', 'YearBuilt'], title='LivingArea vs SalePrice by Neighborhood'
+    )
+    scatter_spec = pfig.to_plotly_json()
+except ImportError:
+    traces = [
+        {
+            'type': 'scatter',
+            'mode': 'markers',
+            'name': str(nb),
+            'x': g['LivingArea'].astype(float).tolist(),
+            'y': g['SalePrice'].astype(float).tolist(),
+        }
+        for nb, g in df.groupby('Neighborhood')
+    ]
+    scatter_spec = {'data': traces, 'layout': {'title': 'LivingArea vs SalePrice by Neighborhood'}}
+
+fig, ax = plt.subplots(figsize=(7, 4))
+for nb, g in df.groupby('Neighborhood'):
+    ax.scatter(g['LivingArea'], g['SalePrice'], alpha=0.7, label=nb)
+ax.set_title('LivingArea vs SalePrice by Neighborhood')
+ax.set_xlabel('LivingArea')
+ax.set_ylabel('SalePrice')
+ax.legend()
+plt.tight_layout()
+`,
+      checkPython: `n_nb = df['Neighborhood'].nunique()
+assert isinstance(scatter_spec, dict) and 'data' in scatter_spec and 'layout' in scatter_spec
+assert len(scatter_spec['data']) == n_nb, f"Kỳ vọng {n_nb} traces, nhận {len(scatter_spec['data'])}"
+assert all('x' in t and 'y' in t and 'name' in t for t in scatter_spec['data'])`,
     },
   },
   {

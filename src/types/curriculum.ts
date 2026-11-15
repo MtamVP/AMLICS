@@ -1,4 +1,5 @@
 export type TrackId =
+  | 'track00_python_basics'
   | 'track01_numpy'
   | 'track02_pandas'
   | 'track03_viz'
@@ -10,7 +11,8 @@ export type TrackId =
   | 'track09_unsupervised_ts'
   | 'track10_pytorch'
   | 'track11_tensorflow'
-  | 'track12_kaggle';
+  | 'track12_kaggle'
+  | 'track13_studio_mastery';
 
 export type DifficultyLevel = 'Cơ bản' | 'Trung bình' | 'Nâng cao' | 'Chuyên sâu';
 

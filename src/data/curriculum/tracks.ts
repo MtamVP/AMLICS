@@ -2,6 +2,16 @@ import { TrackDefinition } from '../../types/curriculum';
 
 export const CURRICULUM_TRACKS: TrackDefinition[] = [
   {
+    id: 'track00_python_basics',
+    order: 0,
+    title: 'Phần 0: Python & Tư Duy Machine Learning Từ Con Số 0',
+    shortTitle: '0. Python & Tư duy ML (Mới học)',
+    description:
+      'Khởi đầu hoàn chỉnh cho người chưa từng code ML: biến, list, dict, vòng lặp, hàm, đọc CSV, Feature vs Target, Overfitting và quy trình 6 bước AMLICS.',
+    levelRange: 'Cơ bản (Người mới)',
+    libraries: ['Python', 'Pandas', 'Scikit-Learn'],
+  },
+  {
     id: 'track01_numpy',
     order: 1,
     title: 'Phần 1: Python & NumPy Vectorization Cốt Lõi',
@@ -120,5 +130,15 @@ export const CURRICULUM_TRACKS: TrackDefinition[] = [
       '7 bước hoàn chỉnh của Grandmaster: Baseline nhanh, Audit Leakage, Adversarial Validation, FE theo CV, Tuning, Blend/Threshold và đóng gói .pkl.',
     levelRange: 'Nâng cao → Chuyên sâu',
     libraries: ['Kaggle E2E', 'Scikit-Learn'],
+  },
+  {
+    id: 'track13_studio_mastery',
+    order: 13,
+    title: 'Phần 13: Làm Chủ Toàn Bộ 12 Mô Hình & Bộ Tham Số AMLICS Studio',
+    shortTitle: '13. Toàn tập Model & Tham số Studio',
+    description:
+      'Giải mã từng mô hình và từng thanh trượt Hyperparameter bên giao diện Studio, chữa bệnh Overfit/Underfit, đồng bộ Code-to-Config và Auto-Tournament.',
+    levelRange: 'Trung bình → Chuyên sâu',
+    libraries: ['Scikit-Learn', 'XGBoost', 'LightGBM', 'CatBoost'],
   },
 ];

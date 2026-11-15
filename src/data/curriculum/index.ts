@@ -1,5 +1,6 @@
 import { LessonDefinition, TrackDefinition, TrackId } from '../../types/curriculum';
 import { CURRICULUM_TRACKS } from './tracks';
+import { TRACK00_PYTHON_BASICS_LESSONS } from './track00_python_basics';
 import { TRACK01_NUMPY_LESSONS } from './track01_numpy';
 import { TRACK02_PANDAS_LESSONS } from './track02_pandas';
 import { TRACK03_VIZ_LESSONS } from './track03_viz';
@@ -12,10 +13,12 @@ import { TRACK09_UNSUPERVISED_TS_LESSONS } from './track09_unsupervised_ts';
 import { TRACK10_PYTORCH_LESSONS } from './track10_pytorch';
 import { TRACK11_TENSORFLOW_LESSONS } from './track11_tensorflow';
 import { TRACK12_KAGGLE_LESSONS } from './track12_kaggle';
+import { TRACK13_STUDIO_MASTERY_LESSONS } from './track13_studio_mastery';
 
 export { CURRICULUM_TRACKS };
 
-export const ALL_LESSONS: LessonDefinition[] = [
+const ORDERED_RAW_LESSONS: LessonDefinition[] = [
+  ...TRACK00_PYTHON_BASICS_LESSONS,
   ...TRACK01_NUMPY_LESSONS,
   ...TRACK02_PANDAS_LESSONS,
   ...TRACK03_VIZ_LESSONS,
@@ -28,7 +31,13 @@ export const ALL_LESSONS: LessonDefinition[] = [
   ...TRACK10_PYTORCH_LESSONS,
   ...TRACK11_TENSORFLOW_LESSONS,
   ...TRACK12_KAGGLE_LESSONS,
-].sort((a, b) => a.order - b.order);
+  ...TRACK13_STUDIO_MASTERY_LESSONS,
+];
+
+export const ALL_LESSONS: LessonDefinition[] = ORDERED_RAW_LESSONS.map((lesson, idx) => ({
+  ...lesson,
+  order: idx + 1,
+}));
 
 const LESSON_MAP = new Map<string, LessonDefinition>(
   ALL_LESSONS.map((lesson) => [lesson.id, lesson]),

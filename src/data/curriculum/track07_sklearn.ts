@@ -154,6 +154,11 @@ assert float(r2_ridge) >= 0.55, f"r2_ridge={r2_ridge:.3f} chưa đạt >= 0.55."
         contentMarkdown:
           'Dù đơn giản và chạy trong vài mili-giây, Logistic Regression tạo ra xác suất **được hiệu chuẩn rất tốt** (calibrated), giải thích được bằng Odds Ratio ($e^{w_j}$), và hầu như không bị Overfitting trên bộ dữ liệu nhỏ!',
       },
+      {
+        title: '2. Bảng Tham Số LogisticRegression & Cách Tinh Chỉnh',
+        contentMarkdown:
+          '| Tham số | Ý nghĩa & Khoảng chỉnh | Mẹo cho người mới |\n| :--- | :--- | :--- |\n| `C` (`0.01 – 100`) | **Nghịch đảo độ phạt L2** ($C = 1/\\lambda$). **`C` nhỏ = phạt mạnh hơn = chống Overfit** | Nếu điểm Train cao nhưng Test thấp → giảm `C` (`1.0 -> 0.1`); nếu bị Underfit → tăng `C` (`1.0 -> 10.0`) |\n| `penalty` | `"l2"` (mặc định), `"l1"`, `"elasticnet"` | Dùng `"l1"` (cùng `solver="liblinear"` hoặc `"saga"`) để tự đẩy trọng số feature rác về `0` |\n| `max_iter` | Số vòng lặp hội tụ (`100` mặc định hay bị thiếu!) | Luôn đặt `500–2000` (và nhớ bọc `StandardScaler()`) để tránh cảnh báo `ConvergenceWarning` |\n| `class_weight` | `None` hoặc `"balanced"` | Bật `"balanced"` khi nhãn `1` hiếm (`< 20%`) để tăng Recall |',
+      },
     ],
     exercise: {
       prompt: 'So sánh `LogisticRegression` với `C=0.01`, `C=1.0`, `C=100.0` (đều đi qua `SimpleImputer` + `StandardScaler`) bằng `cross_val_score(..., cv=5, scoring="roc_auc")` trên `titanic.csv` (numeric cols). Lưu kết quả vào dict `auc_by_c` và chọn `best_c`.',
@@ -219,6 +224,11 @@ assert max(auc_by_c.values()) >= 0.70, "AUC quá thấp."`,
         contentMarkdown:
           'Nếu cột `Balance` chạy từ `0..200,000` còn `NumProducts` từ `1..4`, khoảng cách Euclid bị chi phối 99.99% bởi `Balance`. Do đó **LUÔN BỌC `StandardScaler` TRƯỚC `KNeighborsClassifier`**.',
       },
+      {
+        title: '2. Bảng Tham Số KNeighborsClassifier / KNeighborsRegressor',
+        contentMarkdown:
+          '| Tham số | Ý nghĩa & Giá trị khuyên dùng | Khi nào chỉnh? |\n| :--- | :--- | :--- |\n| `n_neighbors` (`K`) | Số hàng xóm lấy biểu quyết (`3–25`, nên chọn số **lẻ** cho phân loại 2 lớp) | `K=1..3` → ranh giới lởm chởm dễ Overfit; `K=15..25` → mượt hơn, chống nhiễu tốt hơn |\n| `weights` | `"uniform"` (bỏ phiếu ngang nhau) vs **`"distance"`** (hàng xóm gần nặng phiếu hơn) | Trong AMLICS Studio dùng mặc định `"distance"` cho điểm mượt và chính xác hơn |\n| `metric` / `p` | `"minkowski"` (`p=2` là Euclid, `p=1` là Manhattan) | Thử `p=1` (Manhattan) nếu dữ liệu có nhiều hơn 10 cột liên tục |',
+      },
     ],
     exercise: {
       prompt: 'Trên `iris_extended.csv` (4 cột đo hoa), thử các giá trị `k` lẻ `[1, 3, 5, 9, 15]` với `Pipeline([StandardScaler(), KNeighborsClassifier(n_neighbors=k)])` qua `cross_val_score(..., cv=5)`. Lưu dict `cv_scores` và `best_k`.',
@@ -278,6 +288,11 @@ assert cv_scores[best_k] >= 0.90, f"KNN Iris CV score={cv_scores[best_k]:.3f} qu
         title: '1. Con dao hai lưỡi của Cây Quyết Định',
         contentMarkdown:
           'Một cây để tự do (`max_depth=None`) sẽ tiếp tục tách cho đến khi mỗi chiếc lá chỉ còn đúng 1 mẫu — tức **học vẹt nhiễu 100%**! Việc hãm lại bằng `max_depth=4` hoặc `min_samples_leaf=15` giúp cây giữ đúng các quy luật khái quát nhất.',
+      },
+      {
+        title: '2. Bảng Tham Số DecisionTreeClassifier / DecisionTreeRegressor',
+        contentMarkdown:
+          '| Tham số | Khoảng tối ưu khuyên dùng | Vai trò chống Overfit |\n| :--- | :--- | :--- |\n| `max_depth` | `3–8` (`None` mặc định rất nguy hiểm!) | Giới hạn số tầng hỏi đáp tối đa từ gốc xuống lá |\n| `min_samples_leaf` | `5–30` | Ép mỗi lá cuối phải có tối thiểu `k` mẫu → xóa ngay các nhánh sinh ra chỉ để nhớ 1 điểm nhiễu |\n| `min_samples_split` | `10–40` | Số mẫu tối thiểu để một nút được phép tách đôi tiếp |\n| `criterion` | `"gini"` / `"entropy"` (hoặc `"squared_error"`) | Tiêu chuẩn đo độ thuần khiết nút — `"gini"` nhanh hơn, `"entropy"` cho kết quả gần tương đương |\n| `ccp_alpha` | `0.0 – 0.02` | Cắt tỉa hậu kỳ (Cost-Complexity Pruning) cắt bỏ các nhánh đóng góp quá ít |',
       },
     ],
     exercise: {
@@ -341,6 +356,11 @@ assert float(acc_pruned_test) >= 0.65, f"acc_pruned_test={acc_pruned_test:.3f} q
         title: '1. Khi ranh giới bất thường có hình vòng cung hoặc đảo cô lập',
         contentMarkdown:
           'SVM với nhân `kernel="rbf"` ánh xạ dữ liệu vào không gian vô hạn chiều để tìm siêu phẳng phân tách phi tuyến. Nếu `gamma` quá lớn, mỗi điểm tạo thành một "hòn đảo" tách biệt gây Overfitting cực nặng. Luôn kết hợp `StandardScaler()` trước SVC!',
+      },
+      {
+        title: '2. Bảng Tham Số SVC / SVR & Lưu ý tốc độ',
+        contentMarkdown:
+          '| Tham số SVM | Ý nghĩa & Khoảng chỉnh | Cách tối ưu |\n| :--- | :--- | :--- |\n| `kernel` | `"rbf"` (phi tuyến, khuyên dùng), `"linear"` (tuyến tính), `"poly"` | Chọn `"linear"` nếu số cột > số dòng; `"rbf"` cho bảng ít–vừa (<5k dòng) |\n| `C` | `0.1 – 100.0` (độ khắt khe với điểm sai lề) | `C` lớn = cố phân loại đúng từng điểm (dễ Overfit); `C` nhỏ = lề rộng mượt hơn |\n| `gamma` | `"scale"`, `"auto"`, hoặc `0.001 – 1.0` | **`gamma` lớn** → biên uốn quanh từng điểm; **`"scale"`** thường là điểm khởi đầu an toàn nhất |\n| `probability` | `True` (cần cho `predict_proba` / ROC-AUC) | Lưu ý: bật `True` làm chậm train thêm 5 lần vì phải chạy 5-fold Platt Scaling ngầm |',
       },
     ],
     exercise: {
@@ -461,6 +481,11 @@ assert int(sample_pred) in (0, 1), "sample_pred phải là 0 hoặc 1."`,
         title: '1. Trí tuệ đám đông (Wisdom of the Crowd)',
         contentMarkdown:
           'Mỗi cây đơn lẻ dễ mắc sai lầm cục bộ (High Variance). Khi bạn trồng 200 cây khác nhau trên 200 mẫu bootstrap và lấy trung bình dự đoán của cả 200 cây, sai số ngẫu nhiên tự triệt tiêu nhau!',
+      },
+      {
+        title: '2. Bảng Tham Số RandomForestClassifier / RandomForestRegressor',
+        contentMarkdown:
+          '| Tham số Random Forest | Khoảng tối ưu | Tác dụng & Kinh nghiệm chỉnh |\n| :--- | :--- | :--- |\n| `n_estimators` | `100 – 500` | Càng nhiều cây càng **giảm phương sai và ổn định**, không gây Overfit thêm (chỉ chậm hơn) |\n| `max_depth` | `6 – 18` hoặc `None` | Giới hạn chiều sâu từng cây — nếu dữ liệu nhiễu nên hãm lại ở `8–12` |\n| `min_samples_leaf` | `1 – 20` | Tăng lên `5–15` giúp làm mượt xác suất và chống Overfitting rất tốt |\n| `max_features` | `"sqrt"` (Classification), `0.5–1.0` (Regression) | Số cột tối đa được xét tại mỗi nút — giảm xuống tăng tính đa dạng giữa các cây |\n| `oob_score` | `True` / `False` | Tận dụng ~36.8% dòng không lọt vào bootstrap mỗi cây để đánh giá Validation miễn phí |\n| `n_jobs` | `-1` | Tận dụng toàn bộ nhân CPU song song để rút ngắn thời gian chạy |',
       },
     ],
     exercise: {
@@ -782,6 +807,282 @@ rmsle_val = float(root_mean_squared_log_error(y_te, np.maximum(0, preds)))
 `,
       checkPython: `assert preds is not None and float(np.mean(preds)) > 50000, "Dự đoán phải đã được inverse_func=np.expm1 trả về thang giá thật."
 assert float(rmsle_val) < 0.45, f"rmsle_val={rmsle_val:.4f} quá cao."`,
+    },
+  },
+  {
+    id: 'L112',
+    order: 73,
+    trackId: 'track07_sklearn',
+    title: 'GradientBoosting Cổ Điển (GBDT) & Tham Số subsample (Stochastic Boosting)',
+    subtitle: 'Hiểu sâu GradientBoostingClassifier/Regressor và bộ 5 tham số tinh chỉnh trong AMLICS Studio',
+    difficulty: 'Trung bình',
+    libraries: ['Scikit-Learn', 'NumPy'],
+    estimatedMinutes: 25,
+    datasetIds: ['churn', 'housing'],
+    objectives: [
+      'Phân biệt `GradientBoostingClassifier` (cây tuần tự cổ điển, hỗ trợ `subsample < 1.0`) với `HistGradientBoosting` (dùng bin histogram tốc độ cao).',
+      'Hiểu ý nghĩa từng tham số trên Studio: `n_estimators`, `learning_rate`, `max_depth` (nhỏ 2–5), `min_samples_leaf`, và `subsample`.',
+    ],
+    sections: [
+      {
+        title: '1. Vì sao GradientBoosting thường đặt max_depth nhỏ (2–5) thay vì sâu 10–15?',
+        contentMarkdown:
+          'Khác với Random Forest (mỗi cây độc lập phải đủ sâu để tự quyết định), **Gradient Boosting xây từng cây nhỏ sửa sai dần cho nhau**:\n- Cây số 1 đoán thô, cây số 2 học phần sai sót (`residual`) của cây số 1, cây số 3 sửa lỗi còn lại của tổng (cây 1 + cây 2)...\n- Vì mỗi cây cộng dồn nối tiếp, nếu để `max_depth=10` thì chỉ sau 20 cây mô hình đã **Overfit cực nặng**!\n\n| Tham số `GradientBoosting` | Vai trò & Khoảng tối ưu khuyên dùng |\n| :--- | :--- |\n| `n_estimators` (`100–500`) | Số vòng sửa sai liên tiếp. Luôn tăng khi giảm `learning_rate`. |\n| `learning_rate` (`0.03–0.1`) | Độ lớn mỗi bước sửa sai. Giá trị nhỏ giúp mượt và khó Overfit hơn. |\n| `max_depth` (`2–5`) | Số tầng tương tác giữa các cột (`depth=3` đã học được tương tác bậc 3!). |\n| `min_samples_leaf` (`5–30`) | Số mẫu tối thiểu ở nút lá — tăng lên khi dữ liệu nhiều nhiễu. |\n| `subsample` (`0.7–0.9`) | Mỗi cây chỉ bốc ngẫu nhiên 70–90% dòng train (**Stochastic Gradient Boosting**) để giảm Variance rất hiệu quả. |',
+        callout: {
+          type: 'warning',
+          title: 'Giới hạn thực tế của GradientBoosting cổ điển',
+          text: 'Với dữ liệu nhỏ–vừa (< 10.000 dòng), `GradientBoosting` cực kỳ mạnh và ổn định. Nhưng với > 20.000 dòng hoặc có nhiều `NaN`, hãy chuyển sang **`HistGradientBoosting` / `LightGBM` / `XGBoost`** nhanh hơn gấp 20–50 lần!',
+        },
+      },
+    ],
+    exercise: {
+      prompt:
+        'Trên `bank_churn.csv` (numeric cols `["CreditScore", "Age", "Balance", "NumProducts", "IsActiveMember"]`, chia Stratified 80/20 `random_state=42`), train `GradientBoostingClassifier(n_estimators=120, learning_rate=0.05, max_depth=3, min_samples_leaf=10, subsample=0.8, random_state=42)`. Tính `roc_auc_gb >= 0.72`.',
+      requirements: [
+        'Sử dụng `GradientBoostingClassifier` với `subsample=0.8`, `learning_rate=0.05`, `max_depth=3`.',
+        '`roc_auc_gb >= 0.72` trên tập test.',
+      ],
+      starterCode: `from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import roc_auc_score
+
+df = pd.read_csv('bank_churn.csv')
+X = df[['CreditScore', 'Age', 'Balance', 'NumProducts', 'IsActiveMember']]
+y = df['Churn']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+
+# TODO: Khớp GradientBoostingClassifier với subsample=0.8, learning_rate=0.05, max_depth=3
+gb = None
+roc_auc_gb = 0.0
+`,
+      hintText:
+        '`gb = GradientBoostingClassifier(n_estimators=120, learning_rate=0.05, max_depth=3, min_samples_leaf=10, subsample=0.8, random_state=42).fit(X_tr, y_tr)` và `roc_auc_gb = float(roc_auc_score(y_te, gb.predict_proba(X_te)[:, 1]))`.',
+      solutionCode: `from sklearn.model_selection import train_test_split
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import roc_auc_score
+
+df = pd.read_csv('bank_churn.csv')
+X = df[['CreditScore', 'Age', 'Balance', 'NumProducts', 'IsActiveMember']]
+y = df['Churn']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+
+gb = GradientBoostingClassifier(
+    n_estimators=120, learning_rate=0.05, max_depth=3,
+    min_samples_leaf=10, subsample=0.8, random_state=42
+).fit(X_tr, y_tr)
+roc_auc_gb = float(roc_auc_score(y_te, gb.predict_proba(X_te)[:, 1]))
+`,
+      checkPython: `assert isinstance(gb, GradientBoostingClassifier) and abs(gb.subsample - 0.8) < 1e-6
+assert float(roc_auc_gb) >= 0.72, f"roc_auc_gb={roc_auc_gb:.3f} chưa đạt >= 0.72"`,
+    },
+  },
+  {
+    id: 'L113',
+    order: 74,
+    trackId: 'track07_sklearn',
+    title: 'ExtraTrees (Extremely Randomized Trees): Cơ Chế & Tối Ưu Tham Số',
+    subtitle: 'Khác biệt cốt lõi giữa ExtraTrees vs RandomForest và khi nào ExtraTrees thắng điểm CV',
+    difficulty: 'Trung bình',
+    libraries: ['Scikit-Learn', 'NumPy'],
+    estimatedMinutes: 22,
+    datasetIds: ['housing', 'medical_vitals'],
+    objectives: [
+      'Hiểu vì sao `RandomForest` tìm **ngưỡng chia tốt nhất** tại mỗi nút còn `ExtraTrees` bốc **ngưỡng chia ngẫu nhiên** rồi chọn cái tốt nhất trong số đó.',
+      'Biết cách chỉnh `max_depth`, `min_samples_leaf`, `max_features` cho ExtraTrees để tối đa hóa tốc độ & giảm Overfitting.',
+    ],
+    sections: [
+      {
+        title: '1. ExtraTrees làm việc khác Random Forest ở đúng 1 điểm nhưng tạo lợi thế lớn',
+        contentMarkdown:
+          '| Tiêu chí | `RandomForest` | `ExtraTrees` |\n| :--- | :--- | :--- |\n| Lấy mẫu dòng | Bootstrap có hoàn lại (~63.2% mỗi cây) | Mặc định dùng **toàn bộ** tập train (`bootstrap=False`) |\n| Chọn ngưỡng chia nút | Quét **mọi ngưỡng có thể** để tìm Gini/MSE tốt nhất | Bốc **vài ngưỡng ngẫu nhiên** rồi chọn tốt nhất trong nhóm nhỏ |\n| Tốc độ huấn luyện | Chậm hơn | **Nhanh hơn 2–4 lần** |\n| Điểm mạnh nhất | Tổng quát đều trên nhiều bảng | **Giảm Variance mạnh**, chống nhiễu tốt trên bảng nhiều feature số liên tục |\n\n**Mẹo tối ưu ExtraTrees trên Studio:** Do chọn ngưỡng ngẫu nhiên, cây của ExtraTrees thường **cần `max_depth` lớn hơn RandomForest một chút** (ví dụ `8–16` thay vì `6`) để bù lại phần Bias.',
+      },
+    ],
+    exercise: {
+      prompt:
+        'Trên `housing.csv` (numeric cols điền median trước khi split hoặc bọc `Pipeline`), chia 80/20 `random_state=42`, so sánh thời gian hoặc điểm $R^2$ giữa `ExtraTreesRegressor(n_estimators=120, max_depth=12, min_samples_leaf=2, random_state=42)` và `RandomForestRegressor(n_estimators=120, max_depth=12, min_samples_leaf=2, random_state=42)`. Lưu `r2_et` và `r2_rf` (`r2_et >= 0.72`).',
+      requirements: [
+        'Khớp cả `ExtraTreesRegressor` và `RandomForestRegressor` trong Pipeline có `SimpleImputer(strategy="median")`.',
+        '`r2_et >= 0.72`.',
+      ],
+      starterCode: `from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
+from sklearn.metrics import r2_score
+
+df = pd.read_csv('housing.csv')
+feats = ['LotArea', 'LivingArea', 'Bedrooms', 'YearBuilt', 'DistCenterKm', 'HasGarage']
+X = df[feats]
+y = df['SalePrice']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# TODO: Train et_pipe và rf_pipe rồi tính r2_et, r2_rf
+r2_et = 0.0
+r2_rf = 0.0
+`,
+      hintText:
+        '`et_pipe = make_pipeline(SimpleImputer(strategy="median"), ExtraTreesRegressor(n_estimators=120, max_depth=12, min_samples_leaf=2, random_state=42)).fit(X_tr, y_tr)`.',
+      solutionCode: `from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
+from sklearn.metrics import r2_score
+
+df = pd.read_csv('housing.csv')
+feats = ['LotArea', 'LivingArea', 'Bedrooms', 'YearBuilt', 'DistCenterKm', 'HasGarage']
+X = df[feats]
+y = df['SalePrice']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42)
+
+et_pipe = make_pipeline(SimpleImputer(strategy='median'), ExtraTreesRegressor(n_estimators=120, max_depth=12, min_samples_leaf=2, random_state=42)).fit(X_tr, y_tr)
+rf_pipe = make_pipeline(SimpleImputer(strategy='median'), RandomForestRegressor(n_estimators=120, max_depth=12, min_samples_leaf=2, random_state=42)).fit(X_tr, y_tr)
+r2_et = float(r2_score(y_te, et_pipe.predict(X_te)))
+r2_rf = float(r2_score(y_te, rf_pipe.predict(X_te)))
+`,
+      checkPython: `assert float(r2_et) >= 0.72, f"r2_et={r2_et:.3f} quá thấp"
+assert float(r2_rf) >= 0.70`,
+    },
+  },
+  {
+    id: 'L114',
+    order: 75,
+    trackId: 'track07_sklearn',
+    title: 'HistGradientBoosting: Mô Hình Mặc Định Mạnh Nhất Có Sẵn Trong Scikit-Learn',
+    subtitle: 'Giải mã max_iter, learning_rate, l2_regularization, early_stopping và xử lý NaN tự động',
+    difficulty: 'Trung bình',
+    libraries: ['Scikit-Learn', 'NumPy'],
+    estimatedMinutes: 25,
+    datasetIds: ['kaggle_loan_train'],
+    objectives: [
+      'Hiểu vì sao AMLICS Studio chọn **`HistGradientBoosting`** làm mô hình mặc định thay vì XGBoost/LightGBM: chạy cực nhanh trên cả Pyodide lẫn Cloud và lấy cảm hứng trực tiếp từ LightGBM!',
+      'Nắm vững tính năng **xử lý `NaN` bản địa** (không cần Imputer!) và đánh dấu cột hạng mục `categorical_features="from_dtype"`.',
+      'Tối ưu bộ tham số `max_iter`, `learning_rate`, `max_depth`, `min_samples_leaf`, `l2_regularization`, `early_stopping`.',
+    ],
+    sections: [
+      {
+        title: '1. Bảng giải mã 7 tham số của HistGradientBoosting trong AMLICS Studio',
+        contentMarkdown:
+          '| Tham số Python | Tên trên AMLICS Studio | Ý nghĩa & Cách chỉnh tối ưu |\n| :--- | :--- | :--- |\n| `max_iter` | `N Estimators` (`100–500`) | Số câyBoosting tối đa. Nên để lớn hơn nếu bật `early_stopping=True`. |\n| `learning_rate` | `Learning Rate` (`0.03–0.1`) | Tốc độ học. Giảm còn `0.03` và tăng `max_iter=300` thường cho CV cao nhất. |\n| `max_depth` | `Max Depth` (`4–8`) | Độ sâu tối đa mỗi cây (`None` mặc định, nhưng đặt `5–8` giúp chặn Overfit). |\n| `min_samples_leaf` | `Min Samples Leaf` (`10–50`) | Số mẫu ít nhất trong 1 lá — cực hữu ích với dữ liệu nhiễu hoặc lớn. |\n| `l2_regularization` | `L2 Regularization` (`0.0–10.0`) | Phạt L2 trên giá trị lá giống hệt `reg_lambda` của XGB/LGBM — tăng lên nếu `Train >> Val`. |\n| `early_stopping` | `Early Stopping` (`True/False`) | Tự trích 10% validation nội bộ, dừng ngay khi điểm không tăng nữa. |\n| `class_weight` | `Imbalance: class_weight` | Đặt `"balanced"` nếu nhãn `1` hiếm gặp (`< 15%`). |',
+        callout: {
+          type: 'tip',
+          title: 'Xử lý trực tiếp NaN và Category không cần One-Hot',
+          text: 'Với dữ liệu vừa–lớn, chỉ cần ép các cột chữ sang `.astype("category")` và truyền `categorical_features="from_dtype"`, `HistGradientBoostingClassifier` tự học cách chia nhóm + nhánh đi cho `NaN` luôn!',
+        },
+      },
+    ],
+    exercise: {
+      prompt:
+        'Trên `loan_train.csv` (có cả `NaN` ở `CreditHistory` lẫn cột category `Grade`, `Purpose`, `Region`), không dùng `SimpleImputer` hay `OneHotEncoder`! Hãy chuyển 3 cột chữ sang `dtype="category"`, chia Stratified 80/20 `random_state=42`, rồi train `HistGradientBoostingClassifier(max_iter=200, learning_rate=0.05, max_depth=5, min_samples_leaf=15, l2_regularization=1.0, early_stopping=True, categorical_features="from_dtype", random_state=42)`. Tính `auc_hgb >= 0.68`.',
+      requirements: [
+        'Truyền trực tiếp `X` còn chứa `NaN` ở `CreditHistory` và cột `category` vào `HistGradientBoostingClassifier` (tính năng native của HistGB!).',
+        '`auc_hgb >= 0.68` trên tập Test.',
+      ],
+      starterCode: `from sklearn.model_selection import train_test_split
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import roc_auc_score
+
+df = pd.read_csv('loan_train.csv')
+X = df.drop(columns=['id', 'LoanStatus']).copy()
+for c in ['Grade', 'Purpose', 'Region']:
+    X[c] = X[c].astype('category')
+y = df['LoanStatus']
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+hgb = None
+auc_hgb = 0.0
+`,
+      hintText:
+        '`hgb = HistGradientBoostingClassifier(max_iter=200, learning_rate=0.05, max_depth=5, min_samples_leaf=15, l2_regularization=1.0, early_stopping=True, categorical_features="from_dtype", random_state=42).fit(X_tr, y_tr)`.',
+      solutionCode: `from sklearn.model_selection import train_test_split
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import roc_auc_score
+
+df = pd.read_csv('loan_train.csv')
+X = df.drop(columns=['id', 'LoanStatus']).copy()
+for c in ['Grade', 'Purpose', 'Region']:
+    X[c] = X[c].astype('category')
+y = df['LoanStatus']
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+hgb = HistGradientBoostingClassifier(
+    max_iter=200, learning_rate=0.05, max_depth=5, min_samples_leaf=15,
+    l2_regularization=1.0, early_stopping=True, categorical_features='from_dtype', random_state=42
+).fit(X_tr, y_tr)
+auc_hgb = float(roc_auc_score(y_te, hgb.predict_proba(X_te)[:, 1]))
+`,
+      checkPython: `assert isinstance(hgb, HistGradientBoostingClassifier)
+assert float(auc_hgb) >= 0.68, f"auc_hgb={auc_hgb:.3f} quá thấp"`,
+    },
+  },
+  {
+    id: 'L115',
+    order: 76,
+    trackId: 'track07_sklearn',
+    title: 'MLPNeuralNet (MLPClassifier / MLPRegressor) Trong Scikit-Learn',
+    subtitle: 'Làm chủ mạng nơ-ron đa tầng nhẹ mà không cần PyTorch: hidden_layer_sizes, alpha, learning_rate_init',
+    difficulty: 'Trung bình',
+    libraries: ['Scikit-Learn', 'NumPy'],
+    estimatedMinutes: 25,
+    datasetIds: ['churn', 'iris_ext'],
+    objectives: [
+      'Biết cách dùng `MLPClassifier(hidden_layer_sizes=(128, 64), ...)` và vì sao nó là model `MLPNeuralNet` trên AMLICS Studio.',
+      'Hiểu từng tham số trọng yếu: `hidden_layer_sizes`, `activation="relu"`, `alpha` (L2 weight decay), `learning_rate_init`, `early_stopping=True`.',
+      'Khắc phục lỗi mạng Nơ-ron không hội tụ bằng cách chuẩn hóa `StandardScaler()` bắt buộc.',
+    ],
+    sections: [
+      {
+        title: '1. Kiến trúc & Bộ tham số chuẩn của MLPNeuralNet trong AMLICS Studio',
+        contentMarkdown:
+          'Mục **`MLPNeuralNet`** trong thanh chọn mô hình của AMLICS Studio gọi thẳng `MLPClassifier` / `MLPRegressor` của Scikit-Learn — cực gọn cho bài toán cần ranh giới trơn hoặc học biểu diễn phi tuyến nhẹ:\n\n| Tham số `MLPClassifier` | Giá trị Studio sinh ra | Giải thích & Cách tối ưu |\n| :--- | :--- | :--- |\n| `hidden_layer_sizes` | `(128, 64)` | Tuple số nơ-ron mỗi tầng ẩn: 2 tầng `(128, 64)` cho bảng vừa; `(64, 32)` nếu ít dòng (<500) để tránh Overfit. |\n| `activation` | `"relu"` (mặc định) | Hàm kích hoạt: `"relu"` nhanh và chống mất đạo hàm; `"tanh"` đôi khi mượt hơn trên dữ liệu nhỏ đã scale `[-1, 1]`. |\n| `learning_rate_init` | Map từ `Learning Rate` (`0.001–0.05`) | Bước nhảy ban đầu của Adam. Với MLP nên để **nhỏ hơn cây** (tốt nhất `0.001 – 0.01`) kẻo Loss nhảy loạn! |\n| `alpha` | Map từ `L2 Regularization` | Trọng số phạt L2 trên ma trận trọng số $W$ (nên thử `0.0001`, `0.01`, `0.1`, `1.0`). |\n| `early_stopping` | `True` | Tách 10% validation, tự dừng khi val score đứng yên `n_iter_no_change=10` epoch. |',
+        callout: {
+          type: 'warning',
+          title: 'Bắt buộc chuẩn hóa thang đo & lưu ý Early Stopping trên bảng nhỏ!',
+          text: 'Nếu quên `StandardScaler()`, cột `Balance = 150,000` sẽ khiến gradient nổ tung ngay epoch 1! Ngoài ra, trên bảng nhỏ (< 500 dòng), `early_stopping=True` sẽ cắt mất 10% làm validation (~28 dòng) khiến mạng dễ dừng sớm trước khi kịp hội tụ — khi dữ liệu nhỏ nên đặt `early_stopping=False` và tăng `alpha` L2 (`0.5–1.0`) để chống Overfit.',
+        },
+      },
+    ],
+    exercise: {
+      prompt:
+        'Trên `bank_churn.csv` (`["CreditScore", "Age", "Balance", "NumProducts", "IsActiveMember"]`), chia 80/20 Stratified `random_state=42`. Đóng gói `StandardScaler()` + `MLPClassifier(hidden_layer_sizes=(32, 16), learning_rate_init=0.01, alpha=0.5, max_iter=300, early_stopping=False, random_state=42)`. Tính `auc_mlp >= 0.72`.',
+      requirements: [
+        'Bọc `StandardScaler()` trước `MLPClassifier` trong `Pipeline`.',
+        '`auc_mlp >= 0.72` trên tập test.',
+      ],
+      starterCode: `from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import roc_auc_score
+
+df = pd.read_csv('bank_churn.csv')
+X = df[['CreditScore', 'Age', 'Balance', 'NumProducts', 'IsActiveMember']]
+y = df['Churn']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+
+pipe_mlp = None
+auc_mlp = 0.0
+`,
+      hintText:
+        '`pipe_mlp = Pipeline([("sc", StandardScaler()), ("mlp", MLPClassifier(hidden_layer_sizes=(32, 16), learning_rate_init=0.01, alpha=0.5, max_iter=300, early_stopping=False, random_state=42))]).fit(X_tr, y_tr)`.',
+      solutionCode: `from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import roc_auc_score
+
+df = pd.read_csv('bank_churn.csv')
+X = df[['CreditScore', 'Age', 'Balance', 'NumProducts', 'IsActiveMember']]
+y = df['Churn']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+
+pipe_mlp = Pipeline([
+    ('sc', StandardScaler()),
+    ('mlp', MLPClassifier(hidden_layer_sizes=(32, 16), learning_rate_init=0.01, alpha=0.5, max_iter=300, early_stopping=False, random_state=42)),
+]).fit(X_tr, y_tr)
+auc_mlp = float(roc_auc_score(y_te, pipe_mlp.predict_proba(X_te)[:, 1]))
+`,
+      checkPython: `assert isinstance(pipe_mlp, Pipeline) and any(isinstance(s, MLPClassifier) for _, s in pipe_mlp.steps)
+assert float(auc_mlp) >= 0.72, f"auc_mlp={auc_mlp:.3f} quá thấp"`,
     },
   },
 ];

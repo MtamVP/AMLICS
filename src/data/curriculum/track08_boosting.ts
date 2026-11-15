@@ -103,6 +103,11 @@ assert rmse_step15 < rmse_step1 * 0.85, f"RMSE chưa giảm đủ mạnh từ {r
         contentMarkdown:
           '`XGBoost` bổ sung đạo hàm bậc 2 (Hessian) + thành phần điều chuẩn $\\gamma T + \\frac{1}{2}\\lambda \\sum w^2$ ngay vào hàm mục tiêu tách lá, giúp chống Overfitting vượt trội so với Gradient Boosting cổ điển.\n\nTrên Colab/Kaggle chạy native `xgboost.XGBClassifier`; trên Browser Pyodide nhẹ dùng `HistGradientBoostingClassifier` có thuật toán chia bin tương đương để kiểm thử nhanh.',
       },
+      {
+        title: '2. Bảng Toàn Tập Tham Số XGBoost & Cách Tối Ưu Từng Bước',
+        contentMarkdown:
+          '| Tham số XGBoost | Giá trị khuyên dùng | Ý nghĩa & Chiến lược tối ưu |\n| :--- | :--- | :--- |\n| `n_estimators` | `200–2000` (kèm EarlyStopping) | Số cây tối đa — để dư rồi chặn bằng `early_stopping_rounds=50` |\n| `learning_rate` (`eta`) | `0.02–0.1` | Bước học; hạ xuống `0.03` giúp tăng ổn định CV nhưng cần nhiều cây hơn |\n| `max_depth` | `3–7` | Độ sâu tối đa mỗi cây — giảm xuống `3–4` ngay nếu Train cao hơn Test |\n| `min_child_weight` | `1–20` | Tương đương độ khắt khe tạo lá mới — tăng lên khi dữ liệu nhiều nhiễu hoặc mất cân bằng |\n| `subsample` | `0.7–0.9` | Tỷ lệ mẫu dòng lấy ngẫu nhiên cho mỗi cây để chống Overfitting |\n| `colsample_bytree` | `0.6–0.9` | Tỷ lệ **cột** lấy cho mỗi cây (cực hiệu quả khi nhiều feature tương quan mạnh) |\n| `reg_alpha` / `reg_lambda` | `0–10` / `1–10` | Phạt L1 (triệt feature yếu) và L2 (làm mượt trọng số lá, map từ `l2Regularization` Studio) |\n| `scale_pos_weight` | `count(0) / count(1)` | Cân bằng nhãn hiếm khi gian lận chỉ chiếm 1–5% |',
+      },
     ],
     exercise: {
       prompt: 'Train mô hình `XGBClassifier(n_estimators=120, max_depth=4, learning_rate=0.06, subsample=0.8, colsample_bytree=0.8, eval_metric="logloss", random_state=42)` (tự fallback sang `HistGradientBoostingClassifier` nếu môi trường không có `xgboost`) trên `loan_train.csv` (split 80/20 `stratify=y`). Tính `xgb_auc`.',
@@ -176,6 +181,11 @@ assert float(xgb_auc) >= 0.65, f"xgb_auc={xgb_auc:.3f} chưa đạt >= 0.65."`,
         title: '1. Cột kiểu `category` bản địa trong LightGBM & HistGradientBoosting',
         contentMarkdown:
           'Thay vì One-Hot làm phình bảng thêm hàng chục cột thưa, cả LightGBM lẫn `HistGradientBoostingClassifier(categorical_features=...)` đều tìm cách gom nhóm hạng mục tối ưu trên histogram trực tiếp!',
+      },
+      {
+        title: '2. Bảng Tham Số Quan Trọng Nhất Của LightGBM (Tránh Bẫy num_leaves)',
+        contentMarkdown:
+          '| Tham số LightGBM | Công thức / Khoảng chuẩn | Ghi chú thực chiến |\n| :--- | :--- | :--- |\n| `num_leaves` | **`< 2^max_depth`** (ví dụ `depth=5` → `num_leaves=15..25`) | **Tham số số 1 của LightGBM!** Để mặc định `31` với `max_depth=4` rất dễ bị Overfit |\n| `max_depth` | `4–8` (hoặc `-1`) | Ghìm lại cùng `num_leaves` để khống chế độ phức tạp cây |\n| `min_child_samples` | `20–100` | Giống `min_samples_leaf` — tăng lên `50–100` khi dữ liệu > 20.000 dòng |\n| `colsample_bytree` | `0.6–0.9` | Chọn tập con cột cho từng cây giúp cây đa dạng và chạy nhanh hơn |\n| `subsample` + `subsample_freq=1` | `0.7–0.9` | Nhớ đặt `subsample_freq=1` thì LightGBM mới kích hoạt subsample mỗi cây! |\n| `reg_alpha` / `reg_lambda` | `0–5` / `1–10` | Điều chuẩn L1/L2 giảm dao động dự đoán |',
       },
     ],
     exercise: {
@@ -256,6 +266,11 @@ lgb_auc = float(roc_auc_score(y_te, clf.predict_proba(X_te)[:, 1]))
         title: '1. Ordered Boosting chống Target Leakage trong chính thuật toán',
         contentMarkdown:
           '`CatBoost` (Yandex) giải quyết khéo léo hai vấn đề lớn của dữ liệu bảng: (1) biến phân loại có rất nhiều giá trị được mã hóa theo hoán vị thời gian giả (Ordered Target Encoding) không bị rò rỉ nhãn; (2) cây đối xứng hoạt động như một Regularizer tự nhiên rất khó học vẹt.',
+      },
+      {
+        title: '2. Bảng Tham Số CatBoost & Cách Tinh Chỉnh Chuẩn Kaggle',
+        contentMarkdown:
+          '| Tham số CatBoost | Khoảng khuyên dùng | Cách tối ưu |\n| :--- | :--- | :--- |\n| `iterations` | `300–2000` | Tổng số cây (= `n_estimators`), kết hợp `early_stopping_rounds=50` |\n| `learning_rate` | `0.02–0.1` | CatBoost tự ước lượng learning rate khá thông minh nếu để `None`, hoặc chỉnh tay `0.03–0.06` |\n| `depth` | **`4–8`** (mặc định `6`) | Chú ý CatBoost chỉ tăng tối đa `<= 10`; `depth=6` đã rất mạnh cho phần lớn bảng |\n| `l2_leaf_reg` | `1.0–10.0` (mặc định `3.0`) | Phạt L2 giúp làm mượt lá (= `l2Regularization` Studio) |\n| `random_strength` | `1.0–5.0` | Thêm nhiễu ngẫu nhiên khi chọn ngưỡng chia sớm → tăng chống Overfit |\n| `auto_class_weights` | `"Balanced"` / `None` | Tự cân bằng trọng số khi lớp `1` hiếm gặp |',
       },
     ],
     exercise: {

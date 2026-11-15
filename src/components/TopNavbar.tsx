@@ -169,7 +169,7 @@ export const TopNavbar: React.FC<TopNavbarProps> = ({
                   ? 'bg-[#81c995]/20 text-[#81c995]'
                   : 'text-[#9aa0a6] hover:text-[#81c995]'
               }`}
-              title="Mở hệ thống 108 bài giảng & thực hành Machine Learning từ A-Z"
+              title={`Mở hệ thống ${totalLessonsCount} bài giảng & thực hành Machine Learning từ A-Z`}
             >
               <BookOpen className="w-3 h-3 shrink-0" />
               <span>Học ML ({totalLessonsCount})</span>

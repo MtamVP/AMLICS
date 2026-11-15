@@ -100,12 +100,13 @@ assert abs(float(mean_fare) - float(df['Fare'].mean())) < 1e-6, "mean_fare chưa
       {
         title: '1. Cú pháp cắt lát ma trận X[rows, cols]',
         contentMarkdown:
-          'Với mảng 2D `X` có shape `(N, D)` (N mẫu, D đặc trưng):\n- `X[:, 0]` lấy toàn bộ cột 0 (trả về vector 1D).\n- `X[:, :2]` lấy 2 cột đầu.\n- `X[-10:, :]` lấy 10 dòng cuối.\n\nLưu ý quan trọng: Basic slicing tạo ra **View** (trỏ chung vùng nhớ với mảng gốc). Nếu sửa giá trị trên slice, mảng gốc cũng thay đổi theo! Dùng `.copy()` khi cần độc lập.',
+          'Với mảng 2D `X` có shape `(N, D)` (`N` hàng mẫu, `D` cột đặc trưng):\n\n| Cú pháp | Ý nghĩa | Kiểu trả về |\n| :--- | :--- | :--- |\n| `X[0, 2]` | Phần tử tại dòng 0, cột 2 | Giá trị vô hướng (scalar) |\n| `X[:, 0]` | Toàn bộ dòng, chỉ lấy cột 0 | Vector **1D** shape `(N,)` |\n| `X[:, :2]` | Toàn bộ dòng, lấy 2 cột đầu | Ma trận **2D** shape `(N, 2)` |\n| `X[-10:, :]` | 10 dòng cuối, tất cả các cột | Ma trận **2D** shape `(10, D)` |\n| `X[:, [0, 3]]` | **Fancy Indexing**: lấy riêng cột 0 và cột 3 | **Copy** độc lập `(N, 2)` |\n\nLưu ý quan trọng: Basic slicing tạo ra **View** (trỏ chung vùng nhớ với mảng gốc). Nếu sửa giá trị trên slice, mảng gốc cũng thay đổi theo! Dùng `.copy()` khi cần độc lập.',
         exampleCode: `import numpy as np
 A = np.arange(12).reshape(3, 4)
 sub = A[:2, 1:3]
-print("Ma trận con:\n", sub)
-print("Cột cuối 1D:", A[:, -1])`,
+print("Ma trận A gốc:\n", A)
+print("Ma trận con A[:2, 1:3]:\n", sub)
+print("Cột cuối 1D A[:, -1]:", A[:, -1])`,
       },
     ],
     exercise: {

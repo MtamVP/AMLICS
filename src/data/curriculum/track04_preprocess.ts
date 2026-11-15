@@ -593,4 +593,153 @@ assert 'TotalIncome' in transformed.columns and 'LoanToIncome' in transformed.co
 assert float(cv_roc_auc) >= 0.65, f"cv_roc_auc={cv_roc_auc:.3f} chưa đạt >= 0.65."`,
     },
   },
+  {
+    id: 'L109',
+    order: 42,
+    trackId: 'track04_preprocess',
+    title: 'KNNImputer: Điền Giá Trị Thiếu Thông Minh Theo Hàng Xóm Gần Nhất',
+    subtitle: 'Khi nào dùng KNNImputer thay vì median và vì sao bắt buộc đặt StandardScaler trước KNNImputer',
+    difficulty: 'Trung bình',
+    libraries: ['Preprocessing', 'Scikit-Learn'],
+    estimatedMinutes: 22,
+    datasetIds: ['housing', 'medical_vitals'],
+    objectives: [
+      'Hiểu cách `KNNImputer(n_neighbors=5)` tìm `k` dòng giống nhất về các cột còn lại để ước lượng giá trị thiếu.',
+      'Biết lý do phải đưa `StandardScaler()` (hoặc `RobustScaler`) **trước** `KNNImputer` để cột đơn vị lớn không át khoảng cách.',
+      'So khớp tùy chọn `numericImputer = "knn"` ngay trên thanh tiền xử lý AMLICS Studio.',
+    ],
+    sections: [
+      {
+        title: '1. Điểm yếu của Mean/Median & Sức mạnh của KNNImputer',
+        contentMarkdown:
+          'Nếu một căn nhà có `LotArea = 600 m2`, `Bedrooms = 5`, nhưng bị thiếu cột `LivingArea`, việc điền bằng **trung vị chung** (ví dụ `110 m2` của căn nhà bình dân) là sai lệch nghiêm trọng!\n\n**`KNNImputer(n_neighbors=5)`** sẽ đi tìm **5 căn nhà có diện tích đất, số phòng ngủ, năm xây giống hệt nhất** và lấy trung bình diện tích sàn của 5 hàng xóm đó để điền vào ô thiếu.\n\n| Chiến lược Imputer (AMLICS Studio) | Điểm mạnh | Hạn chế & Khi nào tránh |\n| :--- | :--- | :--- |\n| `median` | An toàn, nhanh, miễn nhiễm outlier | Bỏ qua mối quan hệ giữa các cột |\n| `mean` | Nhanh | Nhạy cảm với giá trị cực đoan (outlier) |\n| `knn` (`KNNImputer`) | Chính xác cao khi các cột tương quan mạnh | Chậm với >50.000 dòng; **bắt buộc scale trước** |\n| `constant_zero` + `MissingIndicator` | Giữ nguyên dấu hiệu giá trị thiếu | Đôi khi làm lệch phân phối nếu 0 mang nghĩa thật |',
+        exampleCode: `from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import KNNImputer
+import pandas as pd
+
+df = pd.read_csv('housing.csv')
+X = df[['LotArea', 'LivingArea', 'Bedrooms', 'YearBuilt', 'SalePrice']].copy()
+print("Số NaN LivingArea trước khi điền:", int(X['LivingArea'].isna().sum()))
+
+pipe_knn = make_pipeline(StandardScaler(), KNNImputer(n_neighbors=5))
+X_filled = pipe_knn.fit_transform(X)
+print("Số NaN sau KNNImputer:", int(np.isnan(X_filled).sum()))`,
+        callout: {
+          type: 'warning',
+          title: 'Quy tắc thứ tự với KNNImputer',
+          text: 'Khoảng cách Euclid rất nhạy thang đo: `LotArea` (1.000–10.000) sẽ đè bẹp `Bedrooms` (1–5). Vì vậy luôn bọc `Pipeline([("scaler", StandardScaler()), ("knn_imp", KNNImputer(n_neighbors=5))])` (hợp lý nhất cho tập vừa & nhỏ).',
+        },
+      },
+    ],
+    exercise: {
+      prompt:
+        'Trên `housing.csv` (lấy các cột `["LotArea", "LivingArea", "Bedrooms", "YearBuilt", "DistCenterKm", "HasGarage"]`), chia Train/Test 80/20 `random_state=42`. Dùng `Pipeline([("scaler", StandardScaler()), ("imp", KNNImputer(n_neighbors=5)), ("reg", Ridge(alpha=5.0))])` huấn luyện dự đoán `SalePrice` và tính `r2_knn` trên tập Test (`r2_knn >= 0.55`).',
+      requirements: [
+        'Sử dụng `KNNImputer(n_neighbors=5)` đặt bên trong `Pipeline` sau khi chia Train/Test (không fit trên tập Test).',
+        '`r2_knn >= 0.55` và kiểm chứng sau khi điền không còn `NaN`.',
+      ],
+      starterCode: `from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import KNNImputer
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score
+
+df = pd.read_csv('housing.csv')
+feats = ['LotArea', 'LivingArea', 'Bedrooms', 'YearBuilt', 'DistCenterKm', 'HasGarage']
+X = df[feats]
+y = df['SalePrice']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# TODO: Tạo pipe có StandardScaler + KNNImputer(n_neighbors=5) + Ridge(alpha=5.0)
+pipe = None
+r2_knn = 0.0
+`,
+      hintText:
+        '`pipe = Pipeline([("scaler", StandardScaler()), ("imp", KNNImputer(n_neighbors=5)), ("reg", Ridge(alpha=5.0))]).fit(X_tr, y_tr)`, `r2_knn = float(r2_score(y_te, pipe.predict(X_te)))`.',
+      solutionCode: `from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.impute import KNNImputer
+from sklearn.linear_model import Ridge
+from sklearn.metrics import r2_score
+
+df = pd.read_csv('housing.csv')
+feats = ['LotArea', 'LivingArea', 'Bedrooms', 'YearBuilt', 'DistCenterKm', 'HasGarage']
+X = df[feats]
+y = df['SalePrice']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.2, random_state=42)
+
+pipe = Pipeline([
+    ('scaler', StandardScaler()),
+    ('imp', KNNImputer(n_neighbors=5)),
+    ('reg', Ridge(alpha=5.0)),
+]).fit(X_tr, y_tr)
+r2_knn = float(r2_score(y_te, pipe.predict(X_te)))
+`,
+      checkPython: `assert isinstance(pipe, Pipeline) and any(isinstance(s, KNNImputer) for _, s in pipe.steps)
+assert float(r2_knn) >= 0.55, f"r2_knn={r2_knn:.3f} quá thấp"`,
+    },
+  },
+  {
+    id: 'L110',
+    order: 43,
+    trackId: 'track04_preprocess',
+    title: 'OneHotEncoder(max_categories) & Chọn Đúng Scaler Trong 5 Chế Độ Studio',
+    subtitle: 'Giới hạn số cột bùng nổ khi One-Hot và so sánh Standard / Robust / MinMax / Quantile / Power',
+    difficulty: 'Trung bình',
+    libraries: ['Preprocessing', 'Scikit-Learn'],
+    estimatedMinutes: 22,
+    datasetIds: ['kaggle_loan_train', 'fraud'],
+    objectives: [
+      'Dùng `OneHotEncoder(max_categories=k, handle_unknown="ignore")` gộp các hạng mục hiếm vào nhóm `"infrequent"`.',
+      'Nắm bảng tra nhanh chọn 1 trong 5 chiến lược `numericScaler` trên AMLICS Studio.',
+    ],
+    sections: [
+      {
+        title: '1. Cạm bẫy bùng nổ số cột & Giải pháp max_categories',
+        contentMarkdown:
+          'Nếu cột `Ward` (Phường/Xã) có 300 giá trị khác nhau, `OneHotEncoder()` thường sẽ đẻ ra 300 cột toàn số `0` — làm mô hình cây chạy chậm và dễ overfit vào các phường chỉ xuất hiện 1–2 lần.\n\nTham số `max_categories=10` (tương ứng thanh trượt `Max One-Hot Categories` trên AMLICS Studio) tự động giữ lại **9 hạng mục phổ biến nhất** và gom toàn bộ hạng mục hiếm vào đúng **1 cột gộp `infrequent`**!',
+      },
+      {
+        title: '2. Bảng tra 5 chế độ Numeric Scaler của AMLICS Studio',
+        contentMarkdown:
+          '| Scaler trong Studio | Công thức biến đổi | Khi nào chọn? |\n| :--- | :--- | :--- |\n| `standard` (`StandardScaler`) | $(x - \\mu) / \\sigma$ | Mặc định tốt cho dữ liệu gần chuẩn + Linear/SVM/MLP |\n| `robust` (`RobustScaler`) | $(x - \\text{median}) / \\text{IQR}$ | **Có nhiều ngoại lai (Outlier)** như `Amount` trong `credit_fraud.csv` |\n| `minmax` (`MinMaxScaler`) | Đưa về đoạn $[0, 1]$ | Dữ liệu không ngoại lai, mạng Nơ-ron hoặc dữ liệu thưa |\n| `quantile_normal` | Ép mọi phân phối về Chuẩn tắc | Dữ liệu lệch nặng, đa đỉnh hoặc có outlier cực lớn |\n| `power_yeojohnson` | Biến đổi lũy thừa (chấp nhận cả số 0 & âm) | Làm đối xứng dữ liệu lệch vừa để tăng điểm Linear/Logistic |',
+      },
+    ],
+    exercise: {
+      prompt:
+        'Trên `loan_train.csv`, dùng `OneHotEncoder(max_categories=3, handle_unknown="ignore", sparse_output=False)` cho cột `Purpose` (có 5 giá trị) → kiểm tra số cột sinh ra đúng bằng `3` (`ohe_mat.shape[1] == 3`). Đồng thời so sánh `RobustScaler` vs `StandardScaler` trên cột `Amount` của `credit_fraud.csv` (lấy max tuyệt đối sau scale: `robust_max > std_max` hay không — kiểm tra `rob_scaled` có IQR ~ 1).',
+      requirements: [
+        '`ohe_mat.shape[1] == 3` nhờ `max_categories=3`.',
+        'Áp dụng `RobustScaler()` lên `df_fraud[["Amount"]]` lưu vào `rob_scaled`.',
+      ],
+      starterCode: `from sklearn.preprocessing import OneHotEncoder, RobustScaler
+
+df_loan = pd.read_csv('loan_train.csv')
+df_fraud = pd.read_csv('credit_fraud.csv')
+
+# TODO: OHE cột ['Purpose'] với max_categories=3, handle_unknown='ignore', sparse_output=False
+ohe = OneHotEncoder(max_categories=3, handle_unknown='ignore', sparse_output=False)
+ohe_mat = ohe.fit_transform(df_loan[['Purpose']])
+
+# TODO: RobustScaler trên df_fraud[['Amount']]
+rob_scaled = RobustScaler().fit_transform(df_fraud[['Amount']])
+`,
+      hintText:
+        'Code mẫu đã gần hoàn chỉnh: kiểm tra thêm `np.median(rob_scaled)` xấp xỉ `0.0` và `ohe_mat.shape == (len(df_loan), 3)`.',
+      solutionCode: `from sklearn.preprocessing import OneHotEncoder, RobustScaler
+
+df_loan = pd.read_csv('loan_train.csv')
+df_fraud = pd.read_csv('credit_fraud.csv')
+
+ohe = OneHotEncoder(max_categories=3, handle_unknown='ignore', sparse_output=False)
+ohe_mat = ohe.fit_transform(df_loan[['Purpose']])
+rob_scaled = RobustScaler().fit_transform(df_fraud[['Amount']])
+`,
+      checkPython: `assert ohe_mat.shape == (len(df_loan), 3), f"Kỳ vọng 3 cột nhờ max_categories=3, nhận {ohe_mat.shape}"
+assert rob_scaled.shape == (len(df_fraud), 1) and abs(float(np.median(rob_scaled))) < 1e-6`,
+    },
+  },
 ];

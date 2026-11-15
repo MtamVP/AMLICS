@@ -99,9 +99,21 @@ const TextbookMarkdown: React.FC<{ content: string }> = ({ content }) => {
   const blocks: Array<
     | { type: 'code'; lang: string; text: string }
     | { type: 'math'; text: string }
+    | { type: 'heading'; level: 2 | 3 | 4; text: string }
+    | { type: 'hr' }
+    | { type: 'table'; headers: string[]; rows: string[][] }
     | { type: 'list'; ordered: boolean; items: string[] }
     | { type: 'paragraph'; text: string }
   > = [];
+
+  const splitTableRow = (rowLine: string): string[] => {
+    const clean = rowLine.trim().replace(/^\|/, '').replace(/\|$/, '');
+    return clean.split('|').map((c) => c.trim());
+  };
+  const isTableSeparator = (rowLine: string): boolean => {
+    const trimmed = rowLine.trim();
+    return trimmed.includes('|') && /^\|?[\s:\-|]+\|?$/.test(trimmed) && trimmed.includes('-');
+  };
 
   const lines = content.split('\n');
   let i = 0;
@@ -124,6 +136,36 @@ const TextbookMarkdown: React.FC<{ content: string }> = ({ content }) => {
       }
       i++;
       blocks.push({ type: 'code', lang, text: codeLines.join('\n') });
+      continue;
+    }
+
+    if (trimmed === '---' || trimmed === '***') {
+      blocks.push({ type: 'hr' });
+      i++;
+      continue;
+    }
+
+    const headingMatch = /^(#{2,4})\s+(.+)$/.exec(trimmed);
+    if (headingMatch) {
+      const lvl = Math.min(4, Math.max(2, headingMatch[1].length)) as 2 | 3 | 4;
+      blocks.push({ type: 'heading', level: lvl, text: headingMatch[2] });
+      i++;
+      continue;
+    }
+
+    if (
+      trimmed.startsWith('|') &&
+      i + 1 < lines.length &&
+      isTableSeparator(lines[i + 1])
+    ) {
+      const headers = splitTableRow(trimmed);
+      i += 2;
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        rows.push(splitTableRow(lines[i]));
+        i++;
+      }
+      blocks.push({ type: 'table', headers, rows });
       continue;
     }
 
@@ -163,6 +205,9 @@ const TextbookMarkdown: React.FC<{ content: string }> = ({ content }) => {
       lines[i].trim() !== '' &&
       !lines[i].trim().startsWith('```') &&
       !lines[i].trim().startsWith('$$') &&
+      !lines[i].trim().startsWith('|') &&
+      !/^#{2,4}\s+/.test(lines[i].trim()) &&
+      lines[i].trim() !== '---' &&
       !lines[i].trim().startsWith('- ') &&
       !lines[i].trim().startsWith('* ') &&
       !/^\d+\.\s+/.test(lines[i].trim())
@@ -176,6 +221,62 @@ const TextbookMarkdown: React.FC<{ content: string }> = ({ content }) => {
   return (
     <div className="space-y-3 text-[14px] leading-7 text-[#d2d6dc]">
       {blocks.map((blk, idx) => {
+        if (blk.type === 'hr') {
+          return <hr key={idx} className="border-[#3c4043] my-2" />;
+        }
+        if (blk.type === 'heading') {
+          const cls =
+            blk.level === 2
+              ? 'text-[15px] font-semibold text-[#e8eaed] pt-1'
+              : blk.level === 3
+                ? 'text-[14px] font-semibold text-[#8ab4f8] pt-0.5'
+                : 'text-[13px] font-semibold text-[#81c995]';
+          return (
+            <div key={idx} className={cls}>
+              {renderInlineText(blk.text)}
+            </div>
+          );
+        }
+        if (blk.type === 'table') {
+          return (
+            <div
+              key={idx}
+              className="overflow-x-auto rounded-md border border-[#3c4043] bg-[#18191a]"
+            >
+              <table className="w-full text-left border-collapse text-[12.5px] leading-5">
+                <thead className="bg-[#292a2d] text-[#e8eaed]">
+                  <tr>
+                    {blk.headers.map((h, hi) => (
+                      <th
+                        key={hi}
+                        className="px-3 py-2 font-semibold border-b border-[#3c4043] whitespace-nowrap"
+                      >
+                        {renderInlineText(h)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {blk.rows.map((r, ri) => (
+                    <tr
+                      key={ri}
+                      className={ri % 2 === 1 ? 'bg-[#202124]/60' : 'bg-transparent'}
+                    >
+                      {blk.headers.map((_, ci) => (
+                        <td
+                          key={ci}
+                          className="px-3 py-2 border-b border-[#3c4043]/60 text-[#d2d6dc] align-top"
+                        >
+                          {renderInlineText(r[ci] ?? '')}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
         if (blk.type === 'code') {
           return (
             <pre
@@ -674,7 +775,7 @@ _df_preview.head(6)`;
               type="button"
               onClick={() => setMobileSyllabusOpen(true)}
               className="lg:hidden p-1.5 rounded border border-[#3c4043] bg-[#292a2d] text-[#e8eaed] hover:bg-[#35363a] mt-0.5 shrink-0"
-              title="Mở mục lục 108 bài"
+              title={`Mở mục lục ${ALL_LESSONS.length} bài`}
             >
               <Menu className="w-4 h-4" />
             </button>

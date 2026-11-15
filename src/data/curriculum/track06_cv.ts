@@ -488,4 +488,106 @@ assert float(best_f1) >= float(f1_default_05), "best_f1 phải >= f1 ở ngưỡ
 assert float(best_f1) > 0.35, f"best_f1={best_f1:.3f} quá thấp."`,
     },
   },
+  {
+    id: 'L111',
+    order: 60,
+    trackId: 'track06_cv',
+    title: 'Xử Lý Mất Cân Bằng Lớp Toàn Diện: class_weight, Oversampling & Undersampling',
+    subtitle: 'So sánh 4 chế độ ImbalanceStrategy trong AMLICS Studio trên dữ liệu gian lận credit_fraud.csv',
+    difficulty: 'Trung bình',
+    libraries: ['Validation/CV', 'Scikit-Learn'],
+    estimatedMinutes: 25,
+    datasetIds: ['fraud', 'churn'],
+    objectives: [
+      'Hiểu vì sao `Accuracy = 95%` lại là mô hình VÔ DỤNG nếu 95% mẫu đều là lớp `0` (giao dịch sạch).',
+      'Thực hành đúng nguyên tắc **CHỈ resample trên `X_train`**, tuyệt đối KHÔNG đụng vào `X_val` / `X_test`!',
+      'So sánh 4 chế độ của Studio: `none`, `class_weight="balanced"`, `random_oversample`, và `random_undersample`.',
+    ],
+    sections: [
+      {
+        title: '1. Cạm bẫy chết người khi Oversample trước khi Split (Leakage!)',
+        contentMarkdown:
+          'Nếu bạn nhân bản lớp hiếm (`Fraud = 1`) **trước** khi gọi `train_test_split`, bản sao của cùng 1 giao dịch gian lận sẽ chui sang **cả Train lẫn Test** — kết quả F1/AUC tăng giả tạo lên 0.99 nhưng ra đời thực sụp đổ hoàn toàn!\n\n| Chiến lược Studio (`ImbalanceStrategy`) | Cơ chế hoạt động | Khi nào nên chọn? |\n| :--- | :--- | :--- |\n| `none` | Giữ nguyên phân phối gốc | Dữ liệu khá cân bằng (> 25% lớp ít) hoặc chỉ tối ưu Probability/AUC rồi tuning threshold sau |\n| `class_weight` (`"balanced"`) | Phạt nặng hơn ở hàm Loss mỗi khi đoán sai lớp hiếm | **Ưu tiên số 1**: Không sinh dữ liệu trùng, giữ nguyên số dòng, chạy rất nhanh |\n| `random_oversample` | Nhân bản ngẫu nhiên mẫu lớp hiếm **chỉ trong `X_train`** tới bằng số mẫu lớp nhiều | Lớp hiếm quá ít (< 50–100 mẫu) khiến `class_weight` vẫn thiếu ví dụ học |\n| `random_undersample` | Cắt bớt ngẫu nhiên lớp đa số **chỉ trong `X_train`** | Tập train quá khổng lồ (hàng triệu dòng lớp 0), cần giảm RAM & thời gian train |',
+        exampleCode: `from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.metrics import recall_score, f1_score
+import pandas as pd, numpy as np
+
+df = pd.read_csv('credit_fraud.csv')
+X = df.drop(columns=['TxId', 'IsFraud'], errors='ignore')
+y = df['IsFraud']
+print("Tỷ lệ gian lận gốc:", f"{y.mean():.2%}")
+
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.25, stratify=y, random_state=42)
+base = make_pipeline(StandardScaler(), LogisticRegression(max_iter=500)).fit(X_tr, y_tr)
+bal = make_pipeline(StandardScaler(), LogisticRegression(class_weight='balanced', max_iter=500)).fit(X_tr, y_tr)
+print("Recall mặc định:", round(recall_score(y_te, base.predict(X_te)), 3),
+      "| Recall balanced:", round(recall_score(y_te, bal.predict(X_te)), 3))`,
+      },
+    ],
+    exercise: {
+      prompt:
+        'Trên `credit_fraud.csv` (lấy các cột số `["Amount", "HourOfDay", "DistanceKm", "IsForeign", "V1"]`), chia Stratified 75/25 `random_state=42`. Thực hiện 2 cách: (1) `LogisticRegression(class_weight="balanced")` lưu `recall_bal`, và (2) tự viết Random Oversampling **chỉ trên `X_tr, y_tr`** (nhân bản các dòng `y_tr == 1` cho bằng số dòng `y_tr == 0`, `random_state=42`) rồi train `LogisticRegression()` thường lưu `recall_over`. Xác nhận `len(X_tr_over) == 2 * (y_tr == 0).sum()` và `recall_bal >= 0.5`, `recall_over >= 0.5`.',
+      requirements: [
+        'Tất cả bước Oversampling chỉ thực hiện trên tập Train (`X_tr, y_tr`), tập Test giữ nguyên phân phối gốc.',
+        '`len(X_tr_over) == 2 * int((y_tr == 0).sum())`.',
+        '`recall_bal >= 0.5` và `recall_over >= 0.5` trên `y_te`.',
+      ],
+      starterCode: `from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import recall_score
+
+df = pd.read_csv('credit_fraud.csv')
+feats = ['Amount', 'HourOfDay', 'DistanceKm', 'IsForeign', 'V1']
+X = df[feats]
+y = df['IsFraud']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.25, stratify=y, random_state=42)
+
+# 1. class_weight='balanced'
+clf_bal = make_pipeline(StandardScaler(), LogisticRegression(class_weight='balanced', max_iter=500)).fit(X_tr, y_tr)
+recall_bal = float(recall_score(y_te, clf_bal.predict(X_te)))
+
+# 2. Random Oversampling CHỈ trên tập train (X_tr, y_tr)
+rng = np.random.RandomState(42)
+X_tr_over = None
+y_tr_over = None
+recall_over = 0.0
+`,
+      hintText:
+        'Lấy `pos_idx = np.where(y_tr.values == 1)[0]`, `neg_cnt = int((y_tr.values == 0).sum())`, `extra_idx = rng.choice(pos_idx, size=neg_cnt - len(pos_idx), replace=True)`, ghép `all_idx = np.concatenate([np.arange(len(y_tr)), extra_idx])` rồi tạo `X_tr_over = X_tr.iloc[all_idx]`, `y_tr_over = y_tr.iloc[all_idx]`.',
+      solutionCode: `from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import recall_score
+
+df = pd.read_csv('credit_fraud.csv')
+feats = ['Amount', 'HourOfDay', 'DistanceKm', 'IsForeign', 'V1']
+X = df[feats]
+y = df['IsFraud']
+X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=0.25, stratify=y, random_state=42)
+
+clf_bal = make_pipeline(StandardScaler(), LogisticRegression(class_weight='balanced', max_iter=500)).fit(X_tr, y_tr)
+recall_bal = float(recall_score(y_te, clf_bal.predict(X_te)))
+
+rng = np.random.RandomState(42)
+pos_idx = np.where(y_tr.values == 1)[0]
+neg_cnt = int((y_tr.values == 0).sum())
+extra_idx = rng.choice(pos_idx, size=neg_cnt - len(pos_idx), replace=True)
+all_idx = np.concatenate([np.arange(len(y_tr)), extra_idx])
+X_tr_over = X_tr.iloc[all_idx].reset_index(drop=True)
+y_tr_over = y_tr.iloc[all_idx].reset_index(drop=True)
+
+clf_over = make_pipeline(StandardScaler(), LogisticRegression(max_iter=500)).fit(X_tr_over, y_tr_over)
+recall_over = float(recall_score(y_te, clf_over.predict(X_te)))
+`,
+      checkPython: `assert len(X_tr_over) == 2 * int((y_tr == 0).sum()), "Số mẫu sau Oversampling chưa cân bằng đúng 50/50."
+assert int((y_tr_over == 1).sum()) == int((y_tr_over == 0).sum())
+assert float(recall_bal) >= 0.5 and float(recall_over) >= 0.5, f"Recall quá thấp: bal={recall_bal:.2f}, over={recall_over:.2f}"`,
+    },
+  },
 ];

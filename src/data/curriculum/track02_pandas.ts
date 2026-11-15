@@ -72,9 +72,15 @@ assert int(pclass_counts.sum()) == len(df)
     ],
     sections: [
       {
-        title: '1. Nguyên tắc sử dụng .loc và .iloc',
+        title: '1. Nguyên tắc sử dụng .loc và .iloc (Không bao giờ nhầm lẫn)',
         contentMarkdown:
-          '- `df.loc[df["SalePrice"] > 300000, ["LivingArea", "SalePrice"]]`: chọn theo **nhãn và điều kiện logic**.\n- `df.iloc[:10, :4]`: chọn theo **vị trí chỉ số 0-based** giống slicing Python.\n- Tuyệt đối tránh gán dạng chuỗi `df[cond]["col"] = val` mà hãy dùng `df.loc[cond, "col"] = val` hoặc `.copy()`.',
+          '| Thuộc tính | Chọn theo gì? | Khoảng `0:3` lấy mốc 3 không? | Ví dụ thực tế |\n| :--- | :--- | :---: | :--- |\n| **`df.loc[rows, cols]`** | **Tên nhãn cột** hoặc điều kiện True/False | **Có** (lấy cả hai đầu nếu là nhãn) | `df.loc[df["SalePrice"] > 300000, ["HouseId", "SalePrice"]]` |\n| **`df.iloc[r_idx, c_idx]`** | **Vị trí số nguyên `0, 1, 2...`** | **Không** (giống Python, bỏ mốc cuối) | `df.iloc[:10, :4]` (10 dòng đầu, 4 cột đầu) |\n| **`df.query("...")`** | Chuỗi điều kiện ngắn gọn kiểu SQL | — | `df.query("Neighborhood == \'Downtown\' and Bedrooms >= 3")` |\n\n- Tuyệt đối tránh gán dạng chuỗi `df[cond]["col"] = val` (dễ sinh `SettingWithCopyWarning`); hãy luôn viết **`df.loc[cond, "col"] = val`** hoặc thêm **`.copy()`** khi tách DataFrame con!',
+        exampleCode: `import pandas as pd
+df = pd.read_csv('housing.csv')
+top5_cols = df.iloc[:5, :4]
+expensive = df.loc[df['SalePrice'] > 350000, ['HouseId', 'Neighborhood', 'SalePrice']].copy()
+print("Số nhà giá > 350k:", len(expensive))
+expensive.head(3)`,
       },
     ],
     exercise: {
@@ -122,9 +128,13 @@ assert len(luxury_df) == len(expected) and len(luxury_df) > 0
     ],
     sections: [
       {
-        title: '1. Kiểm tra bảng thiếu dữ liệu và điền thông minh theo nhóm',
+        title: '1. Bộ lệnh kiểm tra NaN & Bảng chọn chiến lược Fill',
         contentMarkdown:
-          'Dùng `(df.isna().mean() * 100).round(2)` để thấy ngay % NaN mỗi cột. Thay vì điền `Age` bằng một con số trung bình toàn cục duy nhất, trên Titanic ta có thể điền trung vị `Age` **theo từng hạng vé `Pclass`** bằng `df.groupby("Pclass")["Age"].transform("median")`!',
+          'Ngay khi mở CSV mới, luôn chạy `(df.isna().mean() * 100).round(2)` để thấy tỷ lệ phần trăm bị thiếu của từng cột.\n\n| Trường hợp | Lệnh Pandas | Giải thích |\n| :--- | :--- | :--- |\n| Thiếu rất ít (<2% số dòng) ở cột Target | `df.dropna(subset=["Target"])` | Xóa luôn dòng khuyết nhãn (không tự bịa nhãn `y`!) |\n| Cột số bị lệch phân phối (`Age`, `Income`) | `df["col"].fillna(df["col"].median())` | Trung vị bền vững trước giá trị cực đoan (outlier) |\n| Cột số phân nhóm theo đặc trưng khác | `df.groupby("Pclass")["Age"].transform("median")` | Chính xác hơn nhiều (người hạng vé 1 có độ tuổi khác hạng 3) |\n| Cột chữ / hạng mục (`Embarked`) | `df["col"].fillna(df["col"].mode()[0])` hoặc `"Missing"` | Điền giá trị phổ biến nhất hoặc tách nhóm riêng `"Missing"` |',
+        exampleCode: `import pandas as pd
+df = pd.read_csv('titanic.csv')
+print("Tỷ lệ % thiếu từng cột:\n", (df.isna().mean() * 100).round(2))
+print("Tuổi trung vị theo Pclass:\n", df.groupby('Pclass')['Age'].median())`,
         callout: {
           type: 'warning',
           title: 'Lưu ý Data Leakage',
@@ -181,9 +191,14 @@ assert int(df_clean.isna().sum().sum()) == 0, "df_clean vẫn còn NaN"
     ],
     sections: [
       {
-        title: '1. Accessor .dt và .str cực mạnh trong Pandas',
+        title: '1. Accessor .dt (Ngày tháng) và .str (Chuỗi) cực mạnh trong Pandas',
         contentMarkdown:
-          'Khi đọc CSV, cột ngày luôn ở dạng `object` (chuỗi). Sau khi gọi `df["OrderDate"] = pd.to_datetime(df["OrderDate"])`, bạn dùng ngay:\n- `df["OrderDate"].dt.month`\n- `df["OrderDate"].dt.dayofweek` (0 = Thứ 2, 6 = Chủ nhật)\n- Tương tự với cột mã đơn `"ORD-1005"`, dùng `df["Category"].str.upper()` hoặc `df["OrderId"].str.split("-").str[1]` rất gọn.',
+          'Khi đọc CSV, cột ngày luôn ở dạng `object` (chuỗi). Sau khi gọi `df["OrderDate"] = pd.to_datetime(df["OrderDate"])`, toàn bộ thuộc tính thời gian mở ra qua `.dt`:\n\n| Accessor | Lệnh mẫu | Kết quả trả về |\n| :--- | :--- | :--- |\n| `.dt.year` / `.dt.month` / `.dt.day` | `df["OrderDate"].dt.month` | Năm, Tháng (1..12), Ngày (1..31) |\n| `.dt.dayofweek` | `(df["OrderDate"].dt.dayofweek >= 5).astype(int)` | Thứ trong tuần (`0`=Thứ 2 ... `6`=Chủ nhật) → tách ngày cuối tuần |\n| `.str.lower()` / `.str.strip()` | `df["Category"].str.strip().str.lower()` | Chuẩn hóa chữ thường, cắt khoảng trắng thừa 2 đầu |\n| `.str.contains()` / `.str.split()` | `df["OrderId"].str.split("-").str[1]` | Kiểm tra từ khóa hoặc tách mã chuỗi hàng loạt không cần `for` |',
+        exampleCode: `import pandas as pd
+df = pd.read_csv('orders.csv')
+dt = pd.to_datetime(df['OrderDate'])
+print("Tháng đầu:", dt.dt.month.head(3).tolist(), "| Thứ trong tuần:", dt.dt.dayofweek.head(3).tolist())
+print("Category chữ hoa:", df['Category'].str.upper().head(3).tolist())`,
       },
     ],
     exercise: {
